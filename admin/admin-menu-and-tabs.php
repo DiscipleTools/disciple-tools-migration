@@ -480,15 +480,16 @@ class Disciple_Tools_Migration_Tab_Settings {
  */
 class Disciple_Tools_Migration_Tab_Export {
     public function content() {
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
         ?>
         <div class="wrap">
             <div id="poststuff">
                 <div id="post-body" class="metabox-holder columns-2">
                     <div id="post-body-content">
-                        <?php $this->main_column(); ?>
+                        <?php $this->main_column( $settings ); ?>
                     </div><!-- end post-body-content -->
                     <div id="postbox-container-1" class="postbox-container">
-                        <?php $this->right_column(); ?>
+                        <?php $this->right_column( $settings ); ?>
                     </div><!-- postbox-container 1 -->
                     <div id="postbox-container-2" class="postbox-container">
                     </div><!-- postbox-container 2 -->
@@ -498,7 +499,12 @@ class Disciple_Tools_Migration_Tab_Export {
         <?php
     }
 
-    public function main_column() {
+    /**
+     * Renders the main Export tab content, depending on settings and mode.
+     *
+     * @param array $settings
+     */
+    public function main_column( array $settings ) {
         ?>
         <!-- Box -->
         <table class="widefat striped">
@@ -510,9 +516,33 @@ class Disciple_Tools_Migration_Tab_Export {
             <tbody>
             <tr>
                 <td>
-                    <p>
-                        <?php esc_html_e( 'The Export tab will allow you to generate migration payloads (via API or downloadable files) based on the settings configured on the Settings tab.', 'disciple-tools-migration' ); ?>
-                    </p>
+                    <?php if ( empty( $settings['enabled'] ) ) : ?>
+                        <p>
+                            <?php esc_html_e( 'Migration is currently disabled. Enable it on the Settings tab in order to generate exports.', 'disciple-tools-migration' ); ?>
+                        </p>
+                    <?php else : ?>
+                        <?php if ( $settings['mode'] === 'api' ) : ?>
+                            <p>
+                                <?php esc_html_e( 'This site is configured to serve migration exports via API endpoints.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'In a future phase, a remote Disciple.Tools site (Server B) will be able to call this site (Server A) to fetch settings and records selected on the Settings tab.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'For now, use this tab to confirm that API mode is enabled and review which areas are eligible for export.', 'disciple-tools-migration' ); ?>
+                            </p>
+                        <?php else : ?>
+                            <p>
+                                <?php esc_html_e( 'This site is configured to export migration packages as downloadable files.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'In a future phase, this tab will provide controls to generate a migration package (JSON/zip) that can be downloaded and imported into another Disciple.Tools site.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'The contents of the export will respect the settings and record types you have enabled on the Settings tab.', 'disciple-tools-migration' ); ?>
+                            </p>
+                        <?php endif; ?>
+                    <?php endif; ?>
                 </td>
             </tr>
             </tbody>
@@ -522,7 +552,15 @@ class Disciple_Tools_Migration_Tab_Export {
         <?php
     }
 
-    public function right_column() {
+    /**
+     * Renders the Export information column.
+     *
+     * @param array $settings
+     */
+    public function right_column( array $settings ) {
+        $site_url  = get_site_url();
+        $wp_theme  = wp_get_theme();
+        $dt_version = $wp_theme->version;
         ?>
         <!-- Box -->
         <table class="widefat striped">
@@ -535,7 +573,26 @@ class Disciple_Tools_Migration_Tab_Export {
             <tr>
                 <td>
                     <p>
-                        <?php esc_html_e( 'Export options and previews will be wired up in later phases, once the migration settings and data structures are in place.', 'disciple-tools-migration' ); ?>
+                        <?php
+                        printf(
+                            /* translators: 1: site url, 2: DT theme version */
+                            esc_html__( 'Current site: %1$s (Disciple.Tools version %2$s)', 'disciple-tools-migration' ),
+                            esc_html( $site_url ),
+                            esc_html( $dt_version )
+                        );
+                        ?>
+                    </p>
+                    <p>
+                        <?php
+                        printf(
+                            /* translators: %s: migration mode label */
+                            esc_html__( 'Migration mode: %s', 'disciple-tools-migration' ),
+                            esc_html( $settings['mode'] === 'api' ? __( 'API Endpoints', 'disciple-tools-migration' ) : __( 'Downloadable File', 'disciple-tools-migration' ) )
+                        );
+                        ?>
+                    </p>
+                    <p>
+                        <?php esc_html_e( 'Export will eventually build on this configuration to produce either API responses or downloadable packages containing the selected settings and records.', 'disciple-tools-migration' ); ?>
                     </p>
                 </td>
             </tr>
@@ -554,15 +611,16 @@ class Disciple_Tools_Migration_Tab_Export {
  */
 class Disciple_Tools_Migration_Tab_Import {
     public function content() {
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
         ?>
         <div class="wrap">
             <div id="poststuff">
                 <div id="post-body" class="metabox-holder columns-2">
                     <div id="post-body-content">
-                        <?php $this->main_column(); ?>
+                        <?php $this->main_column( $settings ); ?>
                     </div><!-- end post-body-content -->
                     <div id="postbox-container-1" class="postbox-container">
-                        <?php $this->right_column(); ?>
+                        <?php $this->right_column( $settings ); ?>
                     </div><!-- postbox-container 1 -->
                     <div id="postbox-container-2" class="postbox-container">
                     </div><!-- postbox-container 2 -->
@@ -572,7 +630,12 @@ class Disciple_Tools_Migration_Tab_Import {
         <?php
     }
 
-    public function main_column() {
+    /**
+     * Renders the main Import tab content, depending on settings and mode.
+     *
+     * @param array $settings
+     */
+    public function main_column( array $settings ) {
         ?>
         <!-- Box -->
         <table class="widefat striped">
@@ -584,9 +647,33 @@ class Disciple_Tools_Migration_Tab_Import {
             <tbody>
             <tr>
                 <td>
-                    <p>
-                        <?php esc_html_e( 'The Import tab will allow you to run destructive imports into this site, either from another Disciple.Tools site via API or from a previously exported migration package file.', 'disciple-tools-migration' ); ?>
-                    </p>
+                    <?php if ( empty( $settings['enabled'] ) ) : ?>
+                        <p>
+                            <?php esc_html_e( 'Migration is currently disabled. Enable it on the Settings tab before running imports.', 'disciple-tools-migration' ); ?>
+                        </p>
+                    <?php else : ?>
+                        <?php if ( $settings['mode'] === 'api' ) : ?>
+                            <p>
+                                <?php esc_html_e( 'This site is configured to receive migration data from another Disciple.Tools site via API.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'In a future phase, this tab will provide controls to connect to a source site, preview the incoming payload, and then run a destructive import of the selected settings and records.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'Imports will delete existing records for the selected types before recreating them with preserved IDs from the source, so that internal connections remain valid.', 'disciple-tools-migration' ); ?>
+                            </p>
+                        <?php else : ?>
+                            <p>
+                                <?php esc_html_e( 'This site is configured to import migration packages from a downloadable file.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'In a future phase, this tab will provide a file upload prompt, a preview of the package contents, and controls to apply the import destructively to this site.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <p>
+                                <?php esc_html_e( 'Only the settings and record types you have enabled on the Settings tab will be considered for import.', 'disciple-tools-migration' ); ?>
+                            </p>
+                        <?php endif; ?>
+                    <?php endif; ?>
                 </td>
             </tr>
             </tbody>
@@ -596,7 +683,12 @@ class Disciple_Tools_Migration_Tab_Import {
         <?php
     }
 
-    public function right_column() {
+    /**
+     * Renders the Import information column.
+     *
+     * @param array $settings
+     */
+    public function right_column( array $settings ) {
         ?>
         <!-- Box -->
         <table class="widefat striped">
@@ -610,6 +702,9 @@ class Disciple_Tools_Migration_Tab_Import {
                 <td>
                     <p>
                         <?php esc_html_e( 'Imports will be destructive for the selected entities on this site. Confirmation flows and safety checks will be added alongside the actual import engine in later phases.', 'disciple-tools-migration' ); ?>
+                    </p>
+                    <p>
+                        <?php esc_html_e( 'For now, use this tab to confirm the intended mode (API vs file) and to reason about which settings and record types should be included when we wire up the actual import steps.', 'disciple-tools-migration' ); ?>
                     </p>
                 </td>
             </tr>
