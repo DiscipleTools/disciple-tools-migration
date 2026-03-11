@@ -148,11 +148,15 @@ class Disciple_Tools_Migration_Plugin {
 //        require_once( 'magic-link/magic-link-home.php' );
 
         /**
-         * @todo Decide if you want to add a custom admin page in the admin area
-         * To remove: delete the 3 lines below and remove the folder named /admin
+         * Load the admin menu and shared settings helpers.
+         *
+         * The admin menu UI is only relevant in wp-admin, but the settings helper
+         * methods (e.g. Disciple_Tools_Migration_Menu::get_settings()) are also
+         * required by the REST API endpoints. We therefore load this file for both
+         * admin and REST requests.
          */
-        if ( is_admin() ) {
-            require_once( 'admin/admin-menu-and-tabs.php' ); // adds starter admin page and section for plugin
+        if ( is_admin() || $is_rest ) {
+            require_once( 'admin/admin-menu-and-tabs.php' ); // adds admin page and exposes settings helpers
         }
 
         /**

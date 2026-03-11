@@ -610,8 +610,27 @@ class Disciple_Tools_Migration_Tab_Export {
  * Placeholder for the Migration Import tab. Will be wired to settings and engines in later phases.
  */
 class Disciple_Tools_Migration_Tab_Import {
+    /**
+     * Holds the latest connection test result for display.
+     *
+     * @var array|null
+     */
+    private $connection_result = null;
+
+    /**
+     * Holds the latest connection test error message for display.
+     *
+     * @var string
+     */
+    private $connection_error = '';
+
     public function content() {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
+
+        // Process any submitted connection test form before rendering.
+        $this->process_form_fields( $settings );
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
+
         ?>
         <div class="wrap">
             <div id="poststuff">
@@ -662,6 +681,140 @@ class Disciple_Tools_Migration_Tab_Import {
                             <p>
                                 <?php esc_html_e( 'Imports will delete existing records for the selected types before recreating them with preserved IDs from the source, so that internal connections remain valid.', 'disciple-tools-migration' ); ?>
                             </p>
+                            <hr>
+                            <h3><?php esc_html_e( 'API Connection to Source Site (Server A)', 'disciple-tools-migration' ); ?></h3>
+                            <p>
+                                <?php esc_html_e( 'Use this form to test a connection to the source Disciple.Tools site using JWT authentication and fetch its migration capabilities. This operation is non-destructive.', 'disciple-tools-migration' ); ?>
+                            </p>
+                            <form method="post">
+                                <?php wp_nonce_field( 'dt_migration_import_connection_form', 'dt_migration_import_connection_form_nonce' ); ?>
+                                <table class="widefat striped">
+                                    <tbody>
+                                    <tr>
+                                        <td style="width:30%;">
+                                            <?php esc_html_e( 'Server A Base URL', 'disciple-tools-migration' ); ?>
+                                        </td>
+                                        <td>
+                                            <input type="url"
+                                                   name="dt_migration_api_remote_base_url"
+                                                   style="width:100%;"
+                                                   placeholder="https://example.com"
+                                                   value="<?php echo isset( $settings['api']['remote_base_url'] ) ? esc_attr( $settings['api']['remote_base_url'] ) : ''; ?>">
+                                            <p class="description">
+                                                <?php esc_html_e( 'Enter the base URL of the source Disciple.Tools site (Server A).', 'disciple-tools-migration' ); ?>
+                                            </p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <?php esc_html_e( 'Username', 'disciple-tools-migration' ); ?>
+                                        </td>
+                                        <td>
+                                            <input type="text"
+                                                   name="dt_migration_api_username"
+                                                   style="width:100%;"
+                                                   autocomplete="off">
+                                            <p class="description">
+                                                <?php esc_html_e( 'Disciple.Tools user on Server A that will be used to obtain a JWT token. This value is not stored.', 'disciple-tools-migration' ); ?>
+                                            </p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <?php esc_html_e( 'Password', 'disciple-tools-migration' ); ?>
+                                        </td>
+                                        <td>
+                                            <input type="password"
+                                                   name="dt_migration_api_password"
+                                                   style="width:100%;"
+                                                   autocomplete="off">
+                                            <p class="description">
+                                                <?php esc_html_e( 'Password for the Disciple.Tools user on Server A. This value is not stored.', 'disciple-tools-migration' ); ?>
+                                            </p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <button class="button button-secondary">
+                                                <?php esc_html_e( 'Test Connection & Fetch Capabilities', 'disciple-tools-migration' ); ?>
+                                            </button>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </form>
+                            <?php if ( ! empty( $this->connection_error ) ) : ?>
+                                <div class="notice notice-error" style="margin-top:10px;">
+                                    <p><?php echo esc_html( $this->connection_error ); ?></p>
+                                </div>
+                            <?php elseif ( ! empty( $this->connection_result ) ) : ?>
+                                <h3><?php esc_html_e( 'Server A Capabilities Summary', 'disciple-tools-migration' ); ?></h3>
+                                <table class="widefat striped">
+                                    <tbody>
+                                    <tr>
+                                        <td style="width:30%;"><?php esc_html_e( 'Remote Site URL', 'disciple-tools-migration' ); ?></td>
+                                        <td><?php echo esc_html( $this->connection_result['site_meta']['site_url'] ?? '' ); ?></td>
+                                    </tr>
+                                    <tr>
+                                        <td><?php esc_html_e( 'Disciple.Tools Version', 'disciple-tools-migration' ); ?></td>
+                                        <td><?php echo esc_html( $this->connection_result['site_meta']['dt_version'] ?? '' ); ?></td>
+                                    </tr>
+                                    <tr>
+                                        <td><?php esc_html_e( 'Migration Enabled', 'disciple-tools-migration' ); ?></td>
+                                        <td><?php echo ! empty( $this->connection_result['enabled'] ) ? esc_html__( 'Yes', 'disciple-tools-migration' ) : esc_html__( 'No', 'disciple-tools-migration' ); ?></td>
+                                    </tr>
+                                    <tr>
+                                        <td><?php esc_html_e( 'Migration Mode', 'disciple-tools-migration' ); ?></td>
+                                        <td><?php echo esc_html( $this->connection_result['mode'] ?? '' ); ?></td>
+                                    </tr>
+                                    <tr>
+                                        <td><?php esc_html_e( 'Allowed Settings', 'disciple-tools-migration' ); ?></td>
+                                        <td>
+                                            <?php
+                                            $allowed = $this->connection_result['allowed_items'] ?? [];
+                                            $labels  = [];
+                                            if ( ! empty( $allowed['general_settings'] ) ) {
+                                                $labels[] = esc_html__( 'General Settings', 'disciple-tools-migration' );
+                                            }
+                                            if ( ! empty( $allowed['custom_lists'] ) ) {
+                                                $labels[] = esc_html__( 'Custom Lists', 'disciple-tools-migration' );
+                                            }
+                                            if ( ! empty( $allowed['tiles'] ) ) {
+                                                $labels[] = esc_html__( 'Tiles', 'disciple-tools-migration' );
+                                            }
+                                            if ( ! empty( $allowed['fields'] ) ) {
+                                                $labels[] = esc_html__( 'Fields', 'disciple-tools-migration' );
+                                            }
+                                            if ( ! empty( $allowed['roles'] ) ) {
+                                                $labels[] = esc_html__( 'Roles', 'disciple-tools-migration' );
+                                            }
+                                            if ( ! empty( $allowed['workflows'] ) ) {
+                                                $labels[] = esc_html__( 'Workflows', 'disciple-tools-migration' );
+                                            }
+                                            echo esc_html( implode( ', ', $labels ) );
+                                            ?>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><?php esc_html_e( 'Allowed Record Types', 'disciple-tools-migration' ); ?></td>
+                                        <td>
+                                            <?php
+                                            $records      = $this->connection_result['allowed_items']['records'] ?? [];
+                                            $recordLabels = [];
+                                            if ( ! empty( $records['contacts'] ) ) {
+                                                $recordLabels[] = esc_html__( 'Contacts', 'disciple-tools-migration' );
+                                            }
+                                            if ( ! empty( $records['groups'] ) ) {
+                                                $recordLabels[] = esc_html__( 'Groups', 'disciple-tools-migration' );
+                                            }
+                                            echo esc_html( implode( ', ', $recordLabels ) );
+                                            ?>
+                                        </td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            <?php endif; ?>
                         <?php else : ?>
                             <p>
                                 <?php esc_html_e( 'This site is configured to import migration packages from a downloadable file.', 'disciple-tools-migration' ); ?>
@@ -713,6 +866,125 @@ class Disciple_Tools_Migration_Tab_Import {
         <br>
         <!-- End Box -->
         <?php
+    }
+
+    /**
+     * Processes the "Test Connection & Fetch Capabilities" form for API mode.
+     *
+     * @param array $settings
+     */
+    private function process_form_fields( array $settings ) : void {
+        if ( empty( $settings['enabled'] ) || $settings['mode'] !== 'api' ) {
+            return;
+        }
+
+        if ( ! isset( $_POST['dt_migration_import_connection_form_nonce'] ) ) {
+            return;
+        }
+
+        if ( ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['dt_migration_import_connection_form_nonce'] ) ), 'dt_migration_import_connection_form' ) ) {
+            return;
+        }
+
+        $post_vars = dt_recursive_sanitize_array( $_POST );
+
+        $remote_base_url = isset( $post_vars['dt_migration_api_remote_base_url'] ) ? trim( (string) $post_vars['dt_migration_api_remote_base_url'] ) : '';
+        $username        = isset( $post_vars['dt_migration_api_username'] ) ? (string) $post_vars['dt_migration_api_username'] : '';
+        $password        = isset( $post_vars['dt_migration_api_password'] ) ? (string) $post_vars['dt_migration_api_password'] : '';
+
+        if ( empty( $remote_base_url ) || empty( $username ) || empty( $password ) ) {
+            $this->connection_error = esc_html__( 'Please provide the Server A base URL, username and password.', 'disciple-tools-migration' );
+            return;
+        }
+
+        // Persist the remote base URL in settings for convenience.
+        $settings['api']['remote_base_url'] = $remote_base_url;
+        Disciple_Tools_Migration_Menu::update_settings( $settings );
+
+        $base = rtrim( $remote_base_url, '/' );
+
+        // Step 1: obtain JWT token from Server A.
+        $token_url = $base . '/wp-json/jwt-auth/v1/token';
+        $response  = wp_remote_post(
+            $token_url,
+            [
+                'timeout' => 15,
+                'body'    => [
+                    'username' => $username,
+                    'password' => $password,
+                ],
+            ]
+        );
+
+        if ( is_wp_error( $response ) ) {
+            $this->connection_error = sprintf(
+                /* translators: %s: WP error message */
+                esc_html__( 'Unable to contact Server A token endpoint: %s', 'disciple-tools-migration' ),
+                $response->get_error_message()
+            );
+            return;
+        }
+
+        $code = wp_remote_retrieve_response_code( $response );
+        $body = json_decode( (string) wp_remote_retrieve_body( $response ), true );
+
+        if ( $code < 200 || $code >= 300 || empty( $body['token'] ) ) {
+            $this->connection_error = esc_html__( 'Server A did not return a valid JWT token. Please check credentials and URL.', 'disciple-tools-migration' );
+            return;
+        }
+
+        $token = (string) $body['token'];
+
+        // Optional: validate the token.
+        $validate_url = $base . '/wp-json/jwt-auth/v1/token/validate';
+        $validate     = wp_remote_post(
+            $validate_url,
+            [
+                'timeout' => 15,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $token,
+                ],
+            ]
+        );
+
+        if ( is_wp_error( $validate ) ) {
+            $this->connection_error = sprintf(
+                /* translators: %s: WP error message */
+                esc_html__( 'Unable to validate JWT token on Server A: %s', 'disciple-tools-migration' ),
+                $validate->get_error_message()
+            );
+            return;
+        }
+
+        $capabilities_url = $base . '/wp-json/dt-migration/v1/capabilities';
+        $caps_response    = wp_remote_get(
+            $capabilities_url,
+            [
+                'timeout' => 20,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $token,
+                ],
+            ]
+        );
+
+        if ( is_wp_error( $caps_response ) ) {
+            $this->connection_error = sprintf(
+                /* translators: %s: WP error message */
+                esc_html__( 'Unable to fetch migration capabilities from Server A: %s', 'disciple-tools-migration' ),
+                $caps_response->get_error_message()
+            );
+            return;
+        }
+
+        $caps_code = wp_remote_retrieve_response_code( $caps_response );
+        $caps_body = json_decode( (string) wp_remote_retrieve_body( $caps_response ), true );
+
+        if ( $caps_code < 200 || $caps_code >= 300 || ! is_array( $caps_body ) ) {
+            $this->connection_error = esc_html__( 'Unexpected response when fetching migration capabilities from Server A.', 'disciple-tools-migration' );
+            return;
+        }
+
+        $this->connection_result = $caps_body;
     }
 }
 
