@@ -95,11 +95,15 @@ class Disciple_Tools_Migration_Plugin {
     private function __construct() {
         $is_rest = dt_is_rest();
         /**
-         * @todo Decide if you want to use the REST API example
-         * To remove: delete this following line and remove the folder named /rest-api
+         * Load the migration REST API endpoints.
+         *
+         * Originally this was only loaded when the URL path contained "disciple-tools-migration".
+         * For the dedicated dt-migration REST namespace, we also want to load it for
+         * /wp-json/dt-migration/... requests. The overhead is small, so we simply load it
+         * for all REST requests handled by this plugin.
          */
-        if ( $is_rest && strpos( dt_get_url_path(), 'disciple-tools-migration' ) !== false ) {
-            require_once( 'rest-api/rest-api.php' ); // adds starter rest api class
+        if ( $is_rest ) {
+            require_once( 'rest-api/rest-api.php' );
         }
 
         /**
