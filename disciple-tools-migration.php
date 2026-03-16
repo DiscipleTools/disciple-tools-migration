@@ -160,6 +160,21 @@ class Disciple_Tools_Migration_Plugin {
         }
 
         /**
+         * Load the import engine (shared logic for settings + records).
+         */
+        if ( is_admin() || $is_rest ) {
+            require_once( 'includes/class-dt-migration-import-engine.php' );
+        }
+
+        /**
+         * Load the import AJAX handlers (admin only).
+         */
+        if ( is_admin() ) {
+            require_once( 'admin/class-dt-migration-import-ajax.php' );
+            new Disciple_Tools_Migration_Import_Ajax();
+        }
+
+        /**
          * @todo Decide if you want to support localization of your plugin
          * To remove: delete the line below and remove the folder named /languages
          */

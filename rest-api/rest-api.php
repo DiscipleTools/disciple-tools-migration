@@ -60,6 +60,38 @@ class Disciple_Tools_Migration_Endpoints {
                 },
             ]
         );
+
+        register_rest_route(
+            $namespace,
+            '/records/(?P<post_type>[a-zA-Z0-9_-]+)',
+            [
+                'methods'             => WP_REST_Server::READABLE,
+                'callback'            => [ $this, 'records_batch' ],
+                'permission_callback' => function ( WP_REST_Request $request ) {
+                    return $this->has_permission( $request );
+                },
+                'args'                => [
+                    'post_type' => [
+                        'required'          => true,
+                        'type'              => 'string',
+                        'validate_callback' => function ( $param ) {
+                            return is_string( $param ) && in_array( $param, array_keys( $this->get_allowed_record_types() ), true );
+                        },
+                    ],
+                    'offset'    => [
+                        'default'           => 0,
+                        'sanitize_callback' => 'absint',
+                    ],
+                    'limit'    => [
+                        'default'           => 50,
+                        'sanitize_callback' => function ( $param ) {
+                            $val = absint( $param );
+                            return min( max( 1, $val ), 100 );
+                        },
+                    ],
+                ],
+            ]
+        );
     }
 
     /**
@@ -248,6 +280,92 @@ class Disciple_Tools_Migration_Endpoints {
         ];
 
         return new WP_REST_Response( $response, 200 );
+    }
+
+    /**
+     * Returns post types allowed for record export based on migration settings.
+     *
+     * @return array<string, bool>
+     */
+    protected function get_allowed_record_types() : array {
+        if ( ! class_exists( 'Disciple_Tools_Migration_Menu' ) ) {
+            return [];
+        }
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
+        $allowed  = $settings['allowed_items']['records'] ?? [];
+
+        return is_array( $allowed ) ? $allowed : [];
+    }
+
+    /**
+     * Records batch endpoint (Server A).
+     *
+     * Returns a batch of full record data for the given post type.
+     * Used by Server B during import to pull records in chunks.
+     *
+     * @param WP_REST_Request $request
+     *
+     * @return WP_REST_Response
+     */
+    public function records_batch( WP_REST_Request $request ) : WP_REST_Response {
+        $post_type = $request->get_param( 'post_type' );
+        $offset    = (int) $request->get_param( 'offset' );
+        $limit    = (int) $request->get_param( 'limit' );
+
+        $allowed = $this->get_allowed_record_types();
+        if ( empty( $allowed[ $post_type ] ) ) {
+            return new WP_REST_Response(
+                [
+                    'message'  => __( 'Post type not allowed for migration.', 'disciple-tools-migration' ),
+                    'records'   => [],
+                    'total'     => 0,
+                    'offset'    => $offset,
+                    'limit'     => $limit,
+                    'has_more'  => false,
+                ],
+                403
+            );
+        }
+
+        if ( ! class_exists( 'DT_Posts' ) ) {
+            return new WP_REST_Response(
+                [ 'message' => __( 'DT_Posts not available.', 'disciple-tools-migration' ), 'records' => [] ],
+                500
+            );
+        }
+
+        $query = [
+            'post_type'      => $post_type,
+            'post_status'    => 'any',
+            'posts_per_page' => $limit,
+            'offset'         => $offset,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+        ];
+
+        $wp_query = new WP_Query( $query );
+        $ids      = $wp_query->posts ?? [];
+        $total    = (int) ( $wp_query->found_posts ?? 0 );
+
+        $records = [];
+        foreach ( $ids as $post_id ) {
+            $post = DT_Posts::get_post( $post_type, (int) $post_id, true, false );
+            if ( ! is_wp_error( $post ) && is_array( $post ) ) {
+                $records[] = $post;
+            }
+        }
+
+        return new WP_REST_Response(
+            [
+                'records'  => $records,
+                'total'    => $total,
+                'offset'   => $offset,
+                'limit'    => $limit,
+                'has_more' => ( $offset + count( $records ) ) < $total,
+            ],
+            200
+        );
     }
 
     /**
