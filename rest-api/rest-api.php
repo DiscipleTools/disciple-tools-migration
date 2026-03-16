@@ -48,6 +48,18 @@ class Disciple_Tools_Migration_Endpoints {
                 },
             ]
         );
+
+        register_rest_route(
+            $namespace,
+            '/records-preview',
+            [
+                'methods'             => WP_REST_Server::READABLE,
+                'callback'            => [ $this, 'records_preview' ],
+                'permission_callback' => function ( WP_REST_Request $request ) {
+                    return $this->has_permission( $request );
+                },
+            ]
+        );
     }
 
     /**
@@ -90,10 +102,10 @@ class Disciple_Tools_Migration_Endpoints {
     }
 
     /**
-     * Placeholder export endpoint.
+     * Settings export endpoint (non-destructive).
      *
-     * Accepts a JSON body describing requested sections and echoes back a preview payload,
-     * without touching or exporting any real data yet.
+     * Builds a settings-only export payload similar to the downloadable exports,
+     * respecting the migration settings flags. Records are not included yet.
      *
      * @param WP_REST_Request $request
      *
@@ -116,17 +128,123 @@ class Disciple_Tools_Migration_Endpoints {
             );
         }
 
-        $settings = Disciple_Tools_Migration_Menu::get_settings();
+        $settings        = Disciple_Tools_Migration_Menu::get_settings();
+        $allowed         = $settings['allowed_items'] ?? [];
+        $site_meta       = $this->get_site_meta();
+        $settings_export = [
+            'type'                          => 'api',
+            'dt_tiles_settings'             => [ 'values' => [] ],
+            'dt_tiles_custom_settings'      => [ 'values' => [] ],
+            'dt_fields_settings'            => [ 'values' => [] ],
+            'dt_fields_custom_settings'     => [ 'values' => [] ],
+            'dt_post_types_settings'        => [ 'values' => [] ],
+            'dt_post_types_custom_settings' => [ 'values' => [] ],
+        ];
+
+        // Base post types configuration (without tiles/fields) when any structure-related export is enabled.
+        if ( ! empty( $allowed['tiles'] ) || ! empty( $allowed['fields'] ) || ! empty( $allowed['records'] ) ) {
+            $post_types = [];
+            foreach ( DT_Posts::get_post_types() as $post_type ) {
+                if ( ! isset( $post_types[ $post_type ] ) ) {
+                    $post_type_settings = DT_Posts::get_post_settings( $post_type, false );
+                    unset( $post_type_settings['tiles'], $post_type_settings['fields'] );
+                    $post_types[ $post_type ] = $post_type_settings;
+                }
+            }
+            $settings_export['dt_post_types_settings']['values']        = $post_types;
+            $settings_export['dt_post_types_custom_settings']['values'] = get_option( 'dt_custom_post_types', [] );
+        }
+
+        if ( ! empty( $allowed['tiles'] ) ) {
+            $tiles = [];
+            foreach ( DT_Posts::get_post_types() as $post_type ) {
+                if ( ! isset( $tiles[ $post_type ] ) ) {
+                    $tiles[ $post_type ] = DT_Posts::get_post_tiles( $post_type, false );
+                }
+            }
+            $settings_export['dt_tiles_settings']['values']        = $tiles;
+            $settings_export['dt_tiles_custom_settings']['values'] = dt_get_option( 'dt_custom_tiles' );
+        }
+
+        if ( ! empty( $allowed['fields'] ) ) {
+            $fields = [];
+            foreach ( DT_Posts::get_post_types() as $post_type ) {
+                if ( ! isset( $fields[ $post_type ] ) ) {
+                    $fields[ $post_type ] = DT_Posts::get_post_field_settings( $post_type, false, true );
+                }
+            }
+            $settings_export['dt_fields_settings']['values']        = $fields;
+            $settings_export['dt_fields_custom_settings']['values'] = dt_get_option( 'dt_field_customizations' );
+        }
 
         $response = [
-            'site_meta' => $this->get_site_meta(),
+            'site_meta' => $site_meta,
             'settings'  => [
                 'enabled'       => ! empty( $settings['enabled'] ),
                 'mode'          => $settings['mode'] ?? 'api',
-                'allowed_items' => $settings['allowed_items'] ?? [],
+                'allowed_items' => $allowed,
+            ],
+            'export'    => [
+                'dt_settings' => $settings_export,
             ],
             'request'   => $body,
-            'note'      => __( 'This is a non-destructive preview response. Actual export payloads will be implemented in a later phase.', 'disciple-tools-migration' ),
+            'note'      => __( 'This is a non-destructive settings export payload. Records are not included yet and nothing is applied automatically.', 'disciple-tools-migration' ),
+        ];
+
+        return new WP_REST_Response( $response, 200 );
+    }
+
+    /**
+     * Records preview endpoint (non-destructive).
+     *
+     * Returns record counts for each enabled record post type.
+     *
+     * @param WP_REST_Request $request
+     *
+     * @return WP_REST_Response
+     */
+    public function records_preview( WP_REST_Request $request ) : WP_REST_Response {
+        if ( ! class_exists( 'Disciple_Tools_Migration_Menu' ) ) {
+            return new WP_REST_Response(
+                [
+                    'message'   => __( 'Migration admin menu is not available on this site.', 'disciple-tools-migration' ),
+                    'site_meta' => $this->get_site_meta(),
+                ],
+                200
+            );
+        }
+
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
+        $allowed  = $settings['allowed_items']['records'] ?? [];
+
+        $records = [];
+
+        if ( ! empty( $allowed ) && is_array( $allowed ) ) {
+            foreach ( $allowed as $post_type => $enabled ) {
+                if ( ! $enabled ) {
+                    continue;
+                }
+
+                // Count posts for this post type (non-destructive).
+                $query = new WP_Query(
+                    [
+                        'post_type'      => $post_type,
+                        'post_status'    => 'any',
+                        'posts_per_page' => 1,
+                        'fields'         => 'ids',
+                    ]
+                );
+
+                $records[ $post_type ] = [
+                    'count' => (int) ( $query->found_posts ?? 0 ),
+                ];
+            }
+        }
+
+        $response = [
+            'site_meta' => $this->get_site_meta(),
+            'records'   => $records,
+            'note'      => __( 'Non-destructive records preview; counts only.', 'disciple-tools-migration' ),
         ];
 
         return new WP_REST_Response( $response, 200 );
