@@ -78,6 +78,8 @@ class Disciple_Tools_Migration_Import_Ajax {
 
     /**
      * Handles the import batch AJAX request.
+     *
+     * Supports both API mode (fetch from remote) and file mode (use transient payload).
      */
     public function handle_import_batch() : void {
         check_ajax_referer( 'dt_migration_import', 'nonce' );
@@ -87,8 +89,20 @@ class Disciple_Tools_Migration_Import_Ajax {
         }
 
         $settings = Disciple_Tools_Migration_Menu::get_settings();
-        if ( empty( $settings['enabled'] ) || $settings['mode'] !== 'api' ) {
-            wp_send_json_error( [ 'message' => __( 'Migration is not enabled or not in API mode.', 'disciple-tools-migration' ) ] );
+        if ( empty( $settings['enabled'] ) ) {
+            wp_send_json_error( [ 'message' => __( 'Migration is not enabled.', 'disciple-tools-migration' ) ] );
+        }
+
+        $mode = $settings['mode'] ?? 'api';
+        $step = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : '';
+
+        if ( $mode === 'file' ) {
+            $this->handle_file_mode_batch( $step, $settings );
+            return;
+        }
+
+        if ( $mode !== 'api' ) {
+            wp_send_json_error( [ 'message' => __( 'Migration mode not supported for import.', 'disciple-tools-migration' ) ] );
         }
 
         $remote_url = $settings['api']['remote_base_url'] ?? '';
@@ -103,7 +117,6 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'JWT token expired. Please re-run Test Connection.', 'disciple-tools-migration' ) ] );
         }
 
-        $step = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : '';
         $base = rtrim( $remote_url, '/' );
 
         if ( $step === 'settings' ) {
@@ -200,6 +213,86 @@ class Disciple_Tools_Migration_Import_Ajax {
                 'total'      => $total,
                 'has_more'   => $has_more,
                 'next_offset' => $offset + count( $recs ),
+            ] );
+        }
+
+        wp_send_json_error( [ 'message' => __( 'Invalid step.', 'disciple-tools-migration' ) ] );
+    }
+
+    /**
+     * Handles import batch requests for file mode (payload in transient).
+     *
+     * @param string $step   'settings' or 'records'
+     * @param array  $settings Migration settings.
+     */
+    private function handle_file_mode_batch( string $step, array $settings ) : void {
+        $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
+        $payload       = get_transient( $transient_key );
+
+        if ( ! is_array( $payload ) || empty( $payload['export']['dt_settings'] ) ) {
+            wp_send_json_error( [
+                'message' => __( 'No migration file loaded or payload expired. Please upload the file again.', 'disciple-tools-migration' ),
+            ] );
+        }
+
+        if ( $step === 'settings' ) {
+            $selected = isset( $_POST['settings_selected'] ) && is_array( $_POST['settings_selected'] )
+                ? array_map( 'sanitize_key', wp_unslash( $_POST['settings_selected'] ) )
+                : [];
+
+            $selected_map = array_fill_keys( $selected, true );
+            $result       = Disciple_Tools_Migration_Import_Engine::import_settings( $payload, $selected_map );
+
+            if ( ! empty( $result['errors'] ) ) {
+                wp_send_json_error( [
+                    'message' => implode( ' ', $result['errors'] ),
+                    'applied' => $result['applied'] ?? [],
+                ] );
+            }
+
+            wp_send_json_success( [
+                'done'    => true,
+                'phase'   => 'settings',
+                'applied' => $result['applied'] ?? [],
+            ] );
+        }
+
+        if ( $step === 'records' ) {
+            $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : '';
+            $offset    = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
+            $limit     = 50;
+
+            if ( empty( $post_type ) ) {
+                wp_send_json_error( [ 'message' => __( 'Post type required.', 'disciple-tools-migration' ) ] );
+            }
+
+            $records_all = $payload['records'][ $post_type ] ?? [];
+            if ( ! is_array( $records_all ) ) {
+                $records_all = [];
+            }
+
+            $total     = count( $records_all );
+            $slice     = array_slice( $records_all, $offset, $limit );
+            $has_more  = ( $offset + count( $slice ) ) < $total;
+
+            $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $slice, $offset );
+
+            if ( ! empty( $batch_result['errors'] ) ) {
+                wp_send_json_error( [
+                    'message'  => implode( ' ', $batch_result['errors'] ),
+                    'imported' => $batch_result['imported'] ?? 0,
+                ] );
+            }
+
+            wp_send_json_success( [
+                'done'        => ! $has_more,
+                'phase'       => 'records',
+                'post_type'   => $post_type,
+                'imported'    => $batch_result['imported'],
+                'offset'      => $offset,
+                'total'       => $total,
+                'has_more'    => $has_more,
+                'next_offset' => $offset + count( $slice ),
             ] );
         }
 

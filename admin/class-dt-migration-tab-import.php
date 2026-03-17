@@ -347,14 +347,118 @@ class Disciple_Tools_Migration_Tab_Import {
                             <?php endif; ?>
                         <?php else : ?>
                             <p>
-                                <?php esc_html_e( 'This site is configured to import migration packages from a downloadable file.', 'disciple-tools-migration' ); ?>
+                                <?php esc_html_e( 'This site is configured to import migration packages from a downloadable JSON file.', 'disciple-tools-migration' ); ?>
                             </p>
                             <p>
-                                <?php esc_html_e( 'In a future phase, this tab will provide a file upload prompt, a preview of the package contents, and controls to apply the import destructively to this site.', 'disciple-tools-migration' ); ?>
+                                <?php esc_html_e( 'Upload a migration export file to preview its contents and run an import.', 'disciple-tools-migration' ); ?>
                             </p>
-                            <p>
-                                <?php esc_html_e( 'Only the settings and record types you have enabled on the Settings tab will be considered for import.', 'disciple-tools-migration' ); ?>
-                            </p>
+                            <?php if ( ! empty( $this->connection_error ) ) : ?>
+                                <div class="notice notice-error" style="margin-top:10px;">
+                                    <p><?php echo esc_html( $this->connection_error ); ?></p>
+                                </div>
+                            <?php endif; ?>
+                            <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
+                                <?php wp_nonce_field( 'dt_migration_file_upload', 'dt_migration_file_upload_nonce' ); ?>
+                                <table class="widefat striped">
+                                    <tbody>
+                                    <tr>
+                                        <td style="width:30%;"><?php esc_html_e( 'Migration JSON File', 'disciple-tools-migration' ); ?></td>
+                                        <td>
+                                            <input type="file" name="dt_migration_import_file" accept=".json">
+                                            <p class="description">
+                                                <?php esc_html_e( 'Select a migration export JSON file from another Disciple.Tools site.', 'disciple-tools-migration' ); ?>
+                                            </p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <button type="submit" class="button" name="dt_migration_action" value="file_upload">
+                                                <?php esc_html_e( 'Upload & Preview', 'disciple-tools-migration' ); ?>
+                                            </button>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </form>
+                            <?php if ( ! empty( $this->settings_preview ) ) : ?>
+                                <h3 style="margin-top: 24px;"><?php esc_html_e( 'File Contents Preview', 'disciple-tools-migration' ); ?></h3>
+                                <?php
+                                $allowed          = $this->export_allowed_items ?? [];
+                                $dt_settings      = $this->settings_preview;
+                                $records_preview  = $this->records_preview ?? [];
+                                $post_type_count  = is_array( $records_preview ) ? count( $records_preview ) : 0;
+                                ?>
+                                <table class="widefat striped dt-migration-settings-table" style="margin-bottom: 20px;">
+                                    <thead>
+                                    <tr>
+                                        <th><input type="checkbox" style="margin: 0 0 0 0px;" class="dt-migration-select-all-settings" checked aria-label="<?php esc_attr_e( 'Select all settings', 'disciple-tools-migration' ); ?>"></th>
+                                        <th><?php esc_html_e( 'Setting Type', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Enabled', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Notes', 'disciple-tools-migration' ); ?></th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php
+                                    $settings_rows = [
+                                        'general_settings' => [ 'label' => __( 'General Settings', 'disciple-tools-migration' ), 'notes' => '' ],
+                                        'custom_lists'     => [ 'label' => __( 'Custom Lists', 'disciple-tools-migration' ), 'notes' => '' ],
+                                        'tiles'            => [ 'label' => __( 'Tiles', 'disciple-tools-migration' ), 'notes' => ! empty( $allowed['tiles'] ) ? sprintf( esc_html__( 'Tiles defined for %d post types.', 'disciple-tools-migration' ), $post_type_count ) : '' ],
+                                        'fields'           => [ 'label' => __( 'Fields', 'disciple-tools-migration' ), 'notes' => ! empty( $allowed['fields'] ) ? sprintf( esc_html__( 'Fields defined for %d post types.', 'disciple-tools-migration' ), $post_type_count ) : '' ],
+                                        'roles'            => [ 'label' => __( 'Roles', 'disciple-tools-migration' ), 'notes' => '' ],
+                                        'workflows'        => [ 'label' => __( 'Workflows', 'disciple-tools-migration' ), 'notes' => '' ],
+                                    ];
+                                    foreach ( $settings_rows as $key => $row ) :
+                                        $is_enabled = ! empty( $allowed[ $key ] );
+                                        ?>
+                                        <tr>
+                                            <td>
+                                                <input type="checkbox" class="dt-migration-setting-checkbox" name="dt_migration_import_settings[]" value="<?php echo esc_attr( $key ); ?>" <?php echo $is_enabled ? 'checked' : 'disabled'; ?> data-setting-type="<?php echo esc_attr( $key ); ?>">
+                                            </td>
+                                            <td><?php echo esc_html( $row['label'] ); ?></td>
+                                            <td><?php echo $is_enabled ? esc_html__( 'Yes', 'disciple-tools-migration' ) : esc_html__( 'No', 'disciple-tools-migration' ); ?></td>
+                                            <td><?php echo esc_html( $row['notes'] ); ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                                <table class="widefat striped dt-migration-records-table">
+                                    <thead>
+                                    <tr>
+                                        <th><input type="checkbox" style="margin: 0 0 0 0px;" class="dt-migration-select-all-records" checked aria-label="<?php esc_attr_e( 'Select all record types', 'disciple-tools-migration' ); ?>"></th>
+                                        <th><?php esc_html_e( 'Post Type', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Tiles', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Fields', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Records', 'disciple-tools-migration' ); ?></th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php
+                                    $records_counts = $this->records_preview ?? [];
+                                    $dt_preview     = $this->settings_preview ?? [];
+                                    foreach ( $records_counts as $post_type => $record_data ) {
+                                        $summary      = $dt_preview[ $post_type ] ?? [ 'tiles' => 0, 'fields' => 0 ];
+                                        $record_count = isset( $record_data['count'] ) ? (int) $record_data['count'] : 0;
+                                        ?>
+                                        <tr>
+                                            <td>
+                                                <input type="checkbox" class="dt-migration-record-checkbox" name="dt_migration_import_records[]" value="<?php echo esc_attr( $post_type ); ?>" checked data-post-type="<?php echo esc_attr( $post_type ); ?>" data-record-count="<?php echo (int) $record_count; ?>">
+                                            </td>
+                                            <td><?php echo esc_html( $post_type ); ?></td>
+                                            <td><?php echo isset( $summary['tiles'] ) ? intval( $summary['tiles'] ) : 0; ?></td>
+                                            <td><?php echo isset( $summary['fields'] ) ? intval( $summary['fields'] ) : 0; ?></td>
+                                            <td><?php echo $record_count; ?></td>
+                                        </tr>
+                                    <?php } ?>
+                                    </tbody>
+                                </table>
+                                <p style="margin-top: 16px;">
+                                    <button type="button" class="button button-primary dt-migration-start-import">
+                                        <?php esc_html_e( 'Start Import', 'disciple-tools-migration' ); ?>
+                                    </button>
+                                </p>
+                                <?php $this->render_import_modal_and_progress(); ?>
+                            <?php endif; ?>
                         <?php endif; ?>
                     <?php endif; ?>
                 </td>
@@ -467,7 +571,16 @@ class Disciple_Tools_Migration_Tab_Import {
      * @param array $settings
      */
     private function process_form_fields( array $settings ) : void {
-        if ( empty( $settings['enabled'] ) || $settings['mode'] !== 'api' ) {
+        if ( empty( $settings['enabled'] ) ) {
+            return;
+        }
+
+        if ( $settings['mode'] === 'file' ) {
+            $this->process_file_upload( $settings );
+            return;
+        }
+
+        if ( $settings['mode'] !== 'api' ) {
             return;
         }
 
@@ -681,5 +794,67 @@ class Disciple_Tools_Migration_Tab_Import {
         }
 
         $this->connection_result = $caps_body;
+    }
+
+    /**
+     * Processes file upload for file mode import.
+     *
+     * @param array $settings
+     */
+    private function process_file_upload( array $settings ) : void {
+        if ( ! isset( $_POST['dt_migration_file_upload_nonce'] ) ) {
+            return;
+        }
+
+        if ( ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['dt_migration_file_upload_nonce'] ) ), 'dt_migration_file_upload' ) ) {
+            $this->connection_error = esc_html__( 'Security check failed.', 'disciple-tools-migration' );
+            return;
+        }
+
+        if ( empty( $_FILES['dt_migration_import_file']['tmp_name'] ) ) {
+            $this->connection_error = esc_html__( 'Please select a JSON file to upload.', 'disciple-tools-migration' );
+            return;
+        }
+
+        $content = file_get_contents( sanitize_text_field( wp_unslash( $_FILES['dt_migration_import_file']['tmp_name'] ) ) );
+        if ( $content === false ) {
+            $this->connection_error = esc_html__( 'Could not read the uploaded file.', 'disciple-tools-migration' );
+            return;
+        }
+
+        $payload = json_decode( $content, true );
+        if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $payload ) ) {
+            $this->connection_error = esc_html__( 'Invalid JSON file.', 'disciple-tools-migration' );
+            return;
+        }
+
+        if ( empty( $payload['export']['dt_settings'] ) ) {
+            $this->connection_error = esc_html__( 'The file does not contain a valid migration export.', 'disciple-tools-migration' );
+            return;
+        }
+
+        $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
+        set_transient( $transient_key, $payload, 15 * MINUTE_IN_SECONDS );
+
+        $dt_settings   = $payload['export']['dt_settings'] ?? [];
+        $post_types    = $dt_settings['dt_post_types_settings']['values'] ?? [];
+        $tiles_all     = $dt_settings['dt_tiles_settings']['values'] ?? [];
+        $fields_all    = $dt_settings['dt_fields_settings']['values'] ?? [];
+        $this->export_allowed_items = $payload['settings']['allowed_items'] ?? [];
+
+        $preview = [];
+        foreach ( $post_types as $post_type => $config ) {
+            $preview[ $post_type ] = [
+                'tiles'  => isset( $tiles_all[ $post_type ] ) ? count( (array) $tiles_all[ $post_type ] ) : 0,
+                'fields' => isset( $fields_all[ $post_type ] ) ? count( (array) $fields_all[ $post_type ] ) : 0,
+            ];
+        }
+        $this->settings_preview = $preview;
+
+        $records_raw = $payload['records'] ?? [];
+        $this->records_preview = [];
+        foreach ( $records_raw as $post_type => $recs ) {
+            $this->records_preview[ $post_type ] = [ 'count' => is_array( $recs ) ? count( $recs ) : 0 ];
+        }
     }
 }

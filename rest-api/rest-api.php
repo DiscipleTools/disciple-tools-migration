@@ -171,6 +171,8 @@ class Disciple_Tools_Migration_Endpoints {
             'dt_fields_custom_settings'     => [ 'values' => [] ],
             'dt_post_types_settings'        => [ 'values' => [] ],
             'dt_post_types_custom_settings' => [ 'values' => [] ],
+            'dt_workflows_post_types'       => [ 'values' => [] ],
+            'dt_workflows_defaults'         => [ 'values' => [] ],
         ];
 
         // Base post types configuration (without tiles/fields) when any structure-related export is enabled.
@@ -207,6 +209,17 @@ class Disciple_Tools_Migration_Endpoints {
             }
             $settings_export['dt_fields_settings']['values']        = $fields;
             $settings_export['dt_fields_custom_settings']['values'] = dt_get_option( 'dt_field_customizations' );
+        }
+
+        if ( ! empty( $allowed['workflows'] ) ) {
+            $post_types_raw = get_option( 'dt_workflows_post_types', '' );
+            $defaults_raw  = get_option( 'dt_workflows_defaults', '' );
+            $settings_export['dt_workflows_post_types']['values'] = ! empty( $post_types_raw )
+                ? json_decode( $post_types_raw, true )
+                : [];
+            $settings_export['dt_workflows_defaults']['values']   = ! empty( $defaults_raw )
+                ? json_decode( $defaults_raw, true )
+                : [];
         }
 
         $response = [

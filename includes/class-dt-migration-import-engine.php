@@ -212,12 +212,25 @@ class Disciple_Tools_Migration_Import_Engine {
     /**
      * Applies workflows from export.
      *
+     * Restores dt_workflows_post_types and dt_workflows_defaults from the export payload.
+     *
      * @param array $export_payload
      *
      * @return array
      */
     private static function apply_workflows( array $export_payload ) : array {
-        // Workflows export/import structure may differ; placeholder.
+        $dt_settings = $export_payload['export']['dt_settings'] ?? [];
+
+        $post_types_values = $dt_settings['dt_workflows_post_types']['values'] ?? [];
+        if ( ! empty( $post_types_values ) && is_array( $post_types_values ) ) {
+            update_option( 'dt_workflows_post_types', wp_json_encode( $post_types_values ), true );
+        }
+
+        $defaults_values = $dt_settings['dt_workflows_defaults']['values'] ?? [];
+        if ( ! empty( $defaults_values ) && is_array( $defaults_values ) ) {
+            update_option( 'dt_workflows_defaults', wp_json_encode( $defaults_values ), true );
+        }
+
         return [];
     }
 

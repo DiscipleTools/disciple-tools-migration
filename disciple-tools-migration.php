@@ -167,6 +167,15 @@ class Disciple_Tools_Migration_Plugin {
         }
 
         /**
+         * Load the export file generator and download handler (Downloadable File mode).
+         */
+        if ( is_admin() ) {
+            require_once( 'includes/class-dt-migration-export-file.php' );
+            require_once( 'admin/class-dt-migration-export-download.php' );
+            new Disciple_Tools_Migration_Export_Download();
+        }
+
+        /**
          * Load the import AJAX handlers (admin only).
          */
         if ( is_admin() ) {
