@@ -6,6 +6,7 @@
 
     let $modal, $progress, $confirmInput, $confirmBtn, $cancelBtn, $summary;
     let $progressBar, $progressText, $stepList, $currentPhase, $cancelImport;
+    let $errorDetails, $errorScroll;
 
     let cancelled = false;
     let phases = [];
@@ -91,8 +92,9 @@
     }
 
     function setProgress( percent ) {
-        $progressBar.css( 'width', percent + '%' );
-        $progressText.text( Math.round( percent ) + '%' );
+        const n = ( typeof percent === 'number' && ! isNaN( percent ) ) ? Math.round( percent ) : 0;
+        $progressBar.css( 'width', n + '%' );
+        $progressText.text( n + '%' );
     }
 
     function addStep( label, status ) {
@@ -123,7 +125,14 @@
 
     function showProgress() {
         $progress.show();
+        $errorDetails.hide();
+        $errorScroll.text( '' );
         phases.forEach( ( p, i ) => addStep( p.label, i === 0 ? 'active' : '' ) );
+    }
+
+    function showError( message ) {
+        $errorScroll.text( message || '' );
+        $errorDetails.toggle( !! message );
     }
 
     function runPhase( phase ) {
@@ -173,7 +182,7 @@
                             const d = r.data;
                             totalImported += d.imported || 0;
                             const pct = totalExpected ? ( totalImported / totalExpected ) * 100 : 100;
-                            const phasePct = ( currentPhaseIndex / totalSteps ) * 100 + ( pct / totalSteps );
+                            const phasePct = totalSteps ? ( currentPhaseIndex / totalSteps ) * 100 + ( pct / totalSteps ) : 0;
                             setProgress( Math.min( 100, phasePct ) );
 
                             if ( d.has_more ) {
@@ -231,7 +240,8 @@
             currentPhaseIndex++;
             startNextPhase();
         } ).catch( function( err ) {
-            $currentPhase.text( 'Error: ' + err );
+            $currentPhase.text( 'Import failed.' );
+            showError( err );
             $cancelImport.hide();
         } );
     }
@@ -255,6 +265,8 @@
         $stepList = $( '.dt-migration-step-list' );
         $currentPhase = $( '.dt-migration-current-phase' );
         $cancelImport = $( '.dt-migration-cancel-import' );
+        $errorDetails = $( '#dt-migration-error-details' );
+        $errorScroll = $( '.dt-migration-error-scroll' );
 
         if ( ! $modal.length || ! $( '.dt-migration-start-import' ).length ) {
             return;
@@ -297,6 +309,7 @@
             if ( ! phases.length ) {
                 return;
             }
+            totalSteps = phases.length;
             currentPhaseIndex = 0;
             $summary.text( buildSummary( settings, records ) );
             showModal( phases[ 0 ] );

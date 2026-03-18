@@ -554,6 +554,10 @@ class Disciple_Tools_Migration_Tab_Import {
             </div>
             <ol class="dt-migration-step-list"></ol>
             <p class="dt-migration-current-phase"></p>
+            <div id="dt-migration-error-details" class="dt-migration-error-details" style="display:none;" role="alert">
+                <strong><?php esc_html_e( 'Error details:', 'disciple-tools-migration' ); ?></strong>
+                <div class="dt-migration-error-scroll"></div>
+            </div>
             <button type="button" class="button dt-migration-cancel-import" style="margin-top:10px;">
                 <?php esc_html_e( 'Cancel Import', 'disciple-tools-migration' ); ?>
             </button>

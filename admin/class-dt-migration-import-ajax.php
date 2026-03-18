@@ -73,6 +73,9 @@ class Disciple_Tools_Migration_Import_Ajax {
             .dt-migration-step-list .done { color: #00a32a; }
             .dt-migration-step-list .active { font-weight: 600; }
             .dt-migration-current-phase { margin-top: 8px; font-style: italic; color: #50575e; }
+            .dt-migration-error-details { margin-top: 16px; padding: 12px; background: #fcf0f1; border: 1px solid #d63638; border-radius: 4px; }
+            .dt-migration-error-details strong { display: block; margin-bottom: 8px; color: #b32d2e; }
+            .dt-migration-error-scroll { max-height: 200px; overflow-y: auto; padding: 8px; background: #fff; border: 1px solid #c3c4c7; border-radius: 4px; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
         ';
     }
 
@@ -151,7 +154,7 @@ class Disciple_Tools_Migration_Import_Ajax {
 
             if ( ! empty( $result['errors'] ) ) {
                 wp_send_json_error( [
-                    'message' => implode( ' ', $result['errors'] ),
+                    'message' => implode( "\n", $result['errors'] ),
                     'applied' => $result['applied'] ?? [],
                 ] );
             }
@@ -199,9 +202,19 @@ class Disciple_Tools_Migration_Import_Ajax {
 
             if ( ! empty( $batch_result['errors'] ) ) {
                 wp_send_json_error( [
-                    'message'  => implode( ' ', $batch_result['errors'] ),
+                    'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
+            }
+
+            if ( $post_type === 'groups' && ! $has_more ) {
+                $conn_result = Disciple_Tools_Migration_Import_Engine::apply_deferred_group_connections();
+                if ( ! empty( $conn_result['errors'] ) ) {
+                    wp_send_json_error( [
+                        'message'  => implode( "\n", $conn_result['errors'] ),
+                        'imported' => $batch_result['imported'] ?? 0,
+                    ] );
+                }
             }
 
             wp_send_json_success( [
@@ -245,7 +258,7 @@ class Disciple_Tools_Migration_Import_Ajax {
 
             if ( ! empty( $result['errors'] ) ) {
                 wp_send_json_error( [
-                    'message' => implode( ' ', $result['errors'] ),
+                    'message' => implode( "\n", $result['errors'] ),
                     'applied' => $result['applied'] ?? [],
                 ] );
             }
@@ -275,13 +288,34 @@ class Disciple_Tools_Migration_Import_Ajax {
             $slice     = array_slice( $records_all, $offset, $limit );
             $has_more  = ( $offset + count( $slice ) ) < $total;
 
-            $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $slice, $offset );
+            try {
+                $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $slice, $offset );
+            } catch ( Throwable $e ) {
+                wp_send_json_error( [
+                    'message' => sprintf(
+                        /* translators: 1: error message, 2: file and line */
+                        __( 'Import failed: %1$s (%2$s)', 'disciple-tools-migration' ),
+                        $e->getMessage(),
+                        $e->getFile() . ':' . $e->getLine()
+                    ),
+                ] );
+            }
 
             if ( ! empty( $batch_result['errors'] ) ) {
                 wp_send_json_error( [
-                    'message'  => implode( ' ', $batch_result['errors'] ),
+                    'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
+            }
+
+            if ( $post_type === 'groups' && ! $has_more ) {
+                $conn_result = Disciple_Tools_Migration_Import_Engine::apply_deferred_group_connections();
+                if ( ! empty( $conn_result['errors'] ) ) {
+                    wp_send_json_error( [
+                        'message'  => implode( "\n", $conn_result['errors'] ),
+                        'imported' => $batch_result['imported'] ?? 0,
+                    ] );
+                }
             }
 
             wp_send_json_success( [
