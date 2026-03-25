@@ -75,6 +75,7 @@ class Disciple_Tools_Migration_Menu {
                 'fields'           => true,
                 'roles'            => true,
                 'workflows'        => true,
+                'system_users'     => true,
                 'records'          => [
                     'contacts' => true,
                     'groups'   => true,

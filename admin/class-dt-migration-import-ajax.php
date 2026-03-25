@@ -242,7 +242,10 @@ class Disciple_Tools_Migration_Import_Ajax {
         $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
         $payload       = get_transient( $transient_key );
 
-        if ( ! is_array( $payload ) || empty( $payload['export']['dt_settings'] ) ) {
+        $export_block = ( is_array( $payload ) && isset( $payload['export'] ) && is_array( $payload['export'] ) ) ? $payload['export'] : [];
+        $has_dt       = ! empty( $export_block['dt_settings'] );
+        $has_users    = array_key_exists( 'system_users', $export_block ) && is_array( $export_block['system_users'] );
+        if ( ! is_array( $payload ) || ( ! $has_dt && ! $has_users ) ) {
             wp_send_json_error( [
                 'message' => __( 'No migration file loaded or payload expired. Please upload the file again.', 'disciple-tools-migration' ),
             ] );

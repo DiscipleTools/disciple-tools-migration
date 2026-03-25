@@ -42,6 +42,13 @@ class Disciple_Tools_Migration_Tab_Import {
      */
     private $export_allowed_items = null;
 
+    /**
+     * WordPress users listed in the last fetched file/API export preview (for table notes).
+     *
+     * @var int
+     */
+    private $import_preview_user_count = 0;
+
     public function content() {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
 
@@ -210,6 +217,9 @@ class Disciple_Tools_Migration_Tab_Import {
                                             if ( ! empty( $allowed['workflows'] ) ) {
                                                 $labels[] = esc_html__( 'Workflows', 'disciple-tools-migration' );
                                             }
+                                            if ( ! empty( $allowed['system_users'] ) ) {
+                                                $labels[] = esc_html__( 'WordPress users (system)', 'disciple-tools-migration' );
+                                            }
                                             echo esc_html( implode( ', ', $labels ) );
                                             ?>
                                         </td>
@@ -267,6 +277,12 @@ class Disciple_Tools_Migration_Tab_Import {
                                     <tbody>
                                     <?php
                                     $settings_rows = [
+                                        'system_users'     => [
+                                            'label' => __( 'WordPress users (system)', 'disciple-tools-migration' ),
+                                            'notes' => $this->import_preview_user_count > 0
+                                                ? sprintf( esc_html__( '%d users in this export (passwords never included).', 'disciple-tools-migration' ), $this->import_preview_user_count )
+                                                : '',
+                                        ],
                                         'general_settings' => [ 'label' => __( 'General Settings', 'disciple-tools-migration' ), 'notes' => '' ],
                                         'custom_lists'     => [ 'label' => __( 'Custom Lists', 'disciple-tools-migration' ), 'notes' => '' ],
                                         'tiles'            => [ 'label' => __( 'Tiles', 'disciple-tools-migration' ), 'notes' => ! empty( $allowed['tiles'] ) ? sprintf( esc_html__( 'Tiles defined for %d post types.', 'disciple-tools-migration' ), $post_type_count ) : '' ],
@@ -401,6 +417,12 @@ class Disciple_Tools_Migration_Tab_Import {
                                     <tbody>
                                     <?php
                                     $settings_rows = [
+                                        'system_users'     => [
+                                            'label' => __( 'WordPress users (system)', 'disciple-tools-migration' ),
+                                            'notes' => $this->import_preview_user_count > 0
+                                                ? sprintf( esc_html__( '%d users in this export (passwords never included).', 'disciple-tools-migration' ), $this->import_preview_user_count )
+                                                : '',
+                                        ],
                                         'general_settings' => [ 'label' => __( 'General Settings', 'disciple-tools-migration' ), 'notes' => '' ],
                                         'custom_lists'     => [ 'label' => __( 'Custom Lists', 'disciple-tools-migration' ), 'notes' => '' ],
                                         'tiles'            => [ 'label' => __( 'Tiles', 'disciple-tools-migration' ), 'notes' => ! empty( $allowed['tiles'] ) ? sprintf( esc_html__( 'Tiles defined for %d post types.', 'disciple-tools-migration' ), $post_type_count ) : '' ],
@@ -654,6 +676,8 @@ class Disciple_Tools_Migration_Tab_Import {
             $post_types  = $dt_settings['dt_post_types_settings']['values'] ?? [];
             $tiles_all   = $dt_settings['dt_tiles_settings']['values'] ?? [];
             $fields_all  = $dt_settings['dt_fields_settings']['values'] ?? [];
+            $sys_users   = $export_body['export']['system_users']['users'] ?? [];
+            $this->import_preview_user_count = is_array( $sys_users ) ? count( $sys_users ) : 0;
 
             // Store allowed_items from export response for use in preview tables.
             $this->export_allowed_items = $export_body['settings']['allowed_items'] ?? [];
@@ -766,7 +790,8 @@ class Disciple_Tools_Migration_Tab_Import {
         }
 
         // Always clear previous preview when re-submitting the form.
-        $this->settings_preview = null;
+        $this->settings_preview           = null;
+        $this->import_preview_user_count = 0;
 
         // Default action: fetch capabilities only.
         $capabilities_url = $base . '/wp-json/dt-migration/v1/capabilities';
@@ -832,8 +857,15 @@ class Disciple_Tools_Migration_Tab_Import {
             return;
         }
 
-        if ( empty( $payload['export']['dt_settings'] ) ) {
+        $export_block = $payload['export'] ?? [];
+        if ( ! is_array( $export_block ) ) {
             $this->connection_error = esc_html__( 'The file does not contain a valid migration export.', 'disciple-tools-migration' );
+            return;
+        }
+        $has_dt_settings = ! empty( $export_block['dt_settings'] );
+        $has_users_block = array_key_exists( 'system_users', $export_block ) && is_array( $export_block['system_users'] );
+        if ( ! $has_dt_settings && ! $has_users_block ) {
+            $this->connection_error = esc_html__( 'The file does not contain a valid migration export (needs settings and/or system user data).', 'disciple-tools-migration' );
             return;
         }
 
@@ -845,6 +877,8 @@ class Disciple_Tools_Migration_Tab_Import {
         $tiles_all     = $dt_settings['dt_tiles_settings']['values'] ?? [];
         $fields_all    = $dt_settings['dt_fields_settings']['values'] ?? [];
         $this->export_allowed_items = $payload['settings']['allowed_items'] ?? [];
+        $sys_users     = $payload['export']['system_users']['users'] ?? [];
+        $this->import_preview_user_count = is_array( $sys_users ) ? count( $sys_users ) : 0;
 
         $preview = [];
         foreach ( $post_types as $post_type => $config ) {

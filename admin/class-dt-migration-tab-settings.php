@@ -116,8 +116,13 @@ class Disciple_Tools_Migration_Tab_Settings {
                             <input type="checkbox" name="dt_migration_allowed_items[workflows]" value="1" <?php checked( ! empty( $settings['allowed_items']['workflows'] ) ); ?> />
                             <?php esc_html_e( 'Workflows', 'disciple-tools-migration' ); ?>
                         </label>
+                        <br>
+                        <label>
+                            <input type="checkbox" name="dt_migration_allowed_items[system_users]" value="1" <?php checked( ! empty( $settings['allowed_items']['system_users'] ) ); ?> />
+                            <?php esc_html_e( 'WordPress users (system)', 'disciple-tools-migration' ); ?>
+                        </label>
                         <p class="description">
-                            <?php esc_html_e( 'Select which Disciple.Tools configuration areas are eligible for migration.', 'disciple-tools-migration' ); ?>
+                            <?php esc_html_e( 'Select which Disciple.Tools configuration areas are eligible for migration. User export includes safe profile data only (no passwords). Source administrators are never created on the target; they must already exist and be matched by email.', 'disciple-tools-migration' ); ?>
                         </p>
                     </fieldset>
                 </td>
@@ -188,6 +193,7 @@ class Disciple_Tools_Migration_Tab_Settings {
         $settings['allowed_items']['fields']           = ! empty( $allowed['fields'] );
         $settings['allowed_items']['roles']            = ! empty( $allowed['roles'] );
         $settings['allowed_items']['workflows']        = ! empty( $allowed['workflows'] );
+        $settings['allowed_items']['system_users']     = ! empty( $allowed['system_users'] );
 
         if ( ! isset( $settings['allowed_items']['records'] ) || ! is_array( $settings['allowed_items']['records'] ) ) {
             $settings['allowed_items']['records'] = [

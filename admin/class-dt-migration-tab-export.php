@@ -59,7 +59,13 @@ class Disciple_Tools_Migration_Tab_Export {
                             $records_preview  = $this->get_api_records_preview( $allowed );
                             $post_type_count  = is_array( $records_preview ) ? count( $records_preview ) : 0;
                             ?>
-                            <?php if ( ! empty( $settings_preview ) || ! empty( $records_preview ) ) : ?>
+                            <?php
+                            $show_api_preview = ! empty( $settings_preview ) || ! empty( $records_preview )
+                                || ! empty( $allowed['general_settings'] ) || ! empty( $allowed['custom_lists'] )
+                                || ! empty( $allowed['roles'] ) || ! empty( $allowed['workflows'] )
+                                || ! empty( $allowed['system_users'] );
+                            ?>
+                            <?php if ( $show_api_preview ) : ?>
                                 <h3 style="margin-top: 20px;"><?php esc_html_e( 'API Export Preview', 'disciple-tools-migration' ); ?></h3>
                                 <p class="description" style="margin-bottom: 16px;">
                                     <?php esc_html_e( 'Summary of what will be exported when Server B connects and fetches from this site.', 'disciple-tools-migration' ); ?>
@@ -74,7 +80,14 @@ class Disciple_Tools_Migration_Tab_Export {
                                     </thead>
                                     <tbody>
                                     <?php
+                                    $wp_user_count = function_exists( 'count_users' ) ? (int) ( count_users()['total_users'] ?? 0 ) : 0;
                                     $settings_rows = [
+                                        'system_users'     => [
+                                            'label' => __( 'WordPress users (system)', 'disciple-tools-migration' ),
+                                            'notes' => ! empty( $allowed['system_users'] ) && $wp_user_count
+                                                ? sprintf( esc_html__( '%d users (safe fields only; no passwords).', 'disciple-tools-migration' ), $wp_user_count )
+                                                : '',
+                                        ],
                                         'general_settings' => [ 'label' => __( 'General Settings', 'disciple-tools-migration' ), 'notes' => '' ],
                                         'custom_lists'     => [ 'label' => __( 'Custom Lists', 'disciple-tools-migration' ), 'notes' => '' ],
                                         'tiles'            => [ 'label' => __( 'Tiles', 'disciple-tools-migration' ), 'notes' => ! empty( $allowed['tiles'] ) ? sprintf( esc_html__( 'Tiles defined for %d post types.', 'disciple-tools-migration' ), $post_type_count ) : '' ],

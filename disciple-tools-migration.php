@@ -163,6 +163,7 @@ class Disciple_Tools_Migration_Plugin {
          * Load the import engine (shared logic for settings + records).
          */
         if ( is_admin() || $is_rest ) {
+            require_once( 'includes/class-dt-migration-system-users.php' );
             require_once( 'includes/class-dt-migration-import-engine.php' );
         }
 

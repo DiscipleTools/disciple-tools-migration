@@ -222,6 +222,13 @@ class Disciple_Tools_Migration_Endpoints {
                 : [];
         }
 
+        $export_out = [
+            'dt_settings' => $settings_export,
+        ];
+        if ( ! empty( $allowed['system_users'] ) && class_exists( 'Disciple_Tools_Migration_System_Users' ) ) {
+            $export_out['system_users'] = Disciple_Tools_Migration_System_Users::build_export_payload();
+        }
+
         $response = [
             'site_meta' => $site_meta,
             'settings'  => [
@@ -229,9 +236,7 @@ class Disciple_Tools_Migration_Endpoints {
                 'mode'          => $settings['mode'] ?? 'api',
                 'allowed_items' => $allowed,
             ],
-            'export'    => [
-                'dt_settings' => $settings_export,
-            ],
+            'export'    => $export_out,
             'request'   => $body,
             'note'      => __( 'This is a non-destructive settings export payload. Records are not included yet and nothing is applied automatically.', 'disciple-tools-migration' ),
         ];
@@ -365,6 +370,9 @@ class Disciple_Tools_Migration_Endpoints {
         foreach ( $ids as $post_id ) {
             $post = DT_Posts::get_post( $post_type, (int) $post_id, true, false );
             if ( ! is_wp_error( $post ) && is_array( $post ) ) {
+                if ( class_exists( 'Disciple_Tools_Migration_Import_Engine' ) ) {
+                    $post = Disciple_Tools_Migration_Import_Engine::attach_migration_comments_to_record( $post_type, $post );
+                }
                 $records[] = $post;
             }
         }

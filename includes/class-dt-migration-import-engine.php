@@ -30,7 +30,7 @@ class Disciple_Tools_Migration_Import_Engine {
      * Imports settings from an export payload.
      *
      * @param array $export_payload Export structure from Server A (export endpoint).
-     * @param array $selected      Selected setting types: general_settings, custom_lists, tiles, fields, roles, workflows.
+     * @param array $selected      Selected setting types: system_users, general_settings, custom_lists, tiles, fields, roles, workflows.
      *
      * @return array{ success: bool, applied: array, errors: array }
      */
@@ -41,8 +41,43 @@ class Disciple_Tools_Migration_Import_Engine {
             'errors'  => [],
         ];
 
-        $dt_settings = $export_payload['export']['dt_settings'] ?? [];
-        if ( empty( $dt_settings ) ) {
+        $export      = $export_payload['export'] ?? [];
+        $dt_settings = is_array( $export['dt_settings'] ?? null ) ? $export['dt_settings'] : [];
+
+        if ( ! empty( $selected['system_users'] ) ) {
+            $system_users = $export['system_users'] ?? null;
+            if ( ! is_array( $system_users ) ) {
+                $result['errors'][] = __( 'Export payload is missing system user data, but WordPress users were selected for import.', 'disciple-tools-migration' );
+                $result['success']  = false;
+            } else {
+                $user_import = Disciple_Tools_Migration_System_Users::apply_import( $system_users );
+                if ( ! empty( $user_import['error'] ) ) {
+                    $result['errors'][] = $user_import['error'];
+                    $result['success']  = false;
+                } else {
+                    $result['applied']['system_users'] = true;
+                }
+            }
+        }
+
+        if ( ! empty( $selected['system_users'] ) && ! $result['success'] ) {
+            return $result;
+        }
+
+        $needs_dt_settings = ! empty( $selected['general_settings'] )
+            || ! empty( $selected['custom_lists'] )
+            || ! empty( $selected['tiles'] )
+            || ! empty( $selected['fields'] )
+            || ! empty( $selected['roles'] )
+            || ! empty( $selected['workflows'] );
+
+        if ( $needs_dt_settings && empty( $dt_settings ) ) {
+            $result['errors'][] = __( 'This export does not include Disciple.Tools settings data, but settings were selected for import.', 'disciple-tools-migration' );
+            $result['success']  = false;
+            return $result;
+        }
+
+        if ( ! $needs_dt_settings && empty( $dt_settings ) ) {
             return $result;
         }
 
@@ -243,6 +278,26 @@ class Disciple_Tools_Migration_Import_Engine {
     }
 
     /**
+     * Adds comment activity to a record for export (Phase 2b).
+     *
+     * @param string $post_type Post type.
+     * @param array  $record    Record from {@see DT_Posts::get_post()}.
+     * @return array Record with optional dt_migration_comments.
+     */
+    public static function attach_migration_comments_to_record( string $post_type, array $record ) : array {
+        if ( ! class_exists( 'DT_Posts' ) || empty( $record['ID'] ) ) {
+            return $record;
+        }
+        $post_id         = (int) $record['ID'];
+        $comments_result = DT_Posts::get_post_comments( $post_type, $post_id, false, 'all', [] );
+        if ( is_wp_error( $comments_result ) || empty( $comments_result['comments'] ) || ! is_array( $comments_result['comments'] ) ) {
+            return $record;
+        }
+        $record['dt_migration_comments'] = $comments_result['comments'];
+        return $record;
+    }
+
+    /**
      * Imports a batch of records for a post type.
      *
      * Preserves post IDs using import_id. Deletes existing records first when offset=0.
@@ -289,6 +344,9 @@ class Disciple_Tools_Migration_Import_Engine {
             if ( ! $post_id ) {
                 continue;
             }
+            $source_author = isset( $record['post_author'] ) ? (int) $record['post_author'] : 0;
+            $mapped_author = $source_author > 0 ? Disciple_Tools_Migration_System_Users::remap_user_id( $source_author ) : 0;
+
             $fields = self::prepare_record_fields_for_import( $record, $post_type );
             $fields = self::filter_fields_for_target( $post_type, $fields );
 
@@ -305,7 +363,7 @@ class Disciple_Tools_Migration_Import_Engine {
                 }
             }
 
-            $err = self::insert_or_update_post( $post_type, $post_id, $fields );
+            $err = self::insert_or_update_post( $post_type, $post_id, $fields, $mapped_author );
             if ( is_wp_error( $err ) ) {
                 $result['errors'][] = sprintf(
                     /* translators: 1: post type, 2: post ID, 3: error message */
@@ -316,6 +374,12 @@ class Disciple_Tools_Migration_Import_Engine {
                 );
             } else {
                 ++$result['imported'];
+                $comment_bundle = $record['dt_migration_comments'] ?? [];
+                if ( ! empty( $comment_bundle ) && is_array( $comment_bundle ) ) {
+                    foreach ( self::import_record_comments( $post_type, $post_id, $comment_bundle ) as $cerr ) {
+                        $result['errors'][] = $cerr;
+                    }
+                }
             }
         }
 
@@ -565,10 +629,191 @@ class Disciple_Tools_Migration_Import_Engine {
     }
 
     /**
+     * Maps a source-site user ID from an exported user_select value to the target site (Phase 2).
+     *
+     * Uses {@see Disciple_Tools_Migration_System_Users::remap_user_id()} when a numeric user
+     * reference is found; leaves email strings for DT_Posts to resolve.
+     *
+     * @param mixed $value Raw user_select field value from {@see DT_Posts::get_post()}.
+     * @return mixed       Integer target user ID, email string, or normalized scalar for DT_Posts.
+     */
+    private static function normalize_and_remap_user_select_for_import( $value ) {
+        if ( is_string( $value ) && filter_var( $value, FILTER_VALIDATE_EMAIL ) ) {
+            return $value;
+        }
+        $source_uid = self::extract_source_user_id_from_export_user_select( $value );
+        if ( $source_uid > 0 ) {
+            return Disciple_Tools_Migration_System_Users::remap_user_id( $source_uid );
+        }
+        return self::normalize_field_value_for_import( $value );
+    }
+
+    /**
+     * Parses a source WordPress user ID from an exported user_select payload.
+     *
+     * @param mixed $value Export shape: array with id / assigned-to, int, or user-{id} string.
+     * @return int         User ID or 0 if not parseable as a user reference.
+     */
+    private static function extract_source_user_id_from_export_user_select( $value ) : int {
+        if ( is_array( $value ) ) {
+            if ( ! empty( $value['assigned-to'] ) && is_string( $value['assigned-to'] ) ) {
+                if ( preg_match( '/^user-(\d+)$/', $value['assigned-to'], $matches ) ) {
+                    return (int) $matches[1];
+                }
+            }
+            if ( isset( $value['id'] ) && is_numeric( $value['id'] ) ) {
+                return (int) $value['id'];
+            }
+            return 0;
+        }
+        if ( is_int( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ) {
+            return (int) $value;
+        }
+        if ( is_string( $value ) && preg_match( '/^user-(\d+)$/', $value, $matches ) ) {
+            return (int) $matches[1];
+        }
+        return 0;
+    }
+
+    /**
+     * Remaps Disciple.Tools-style user tokens in HTML comments: [Label](userId).
+     *
+     * @param string $html Comment HTML/text.
+     * @return string
+     */
+    private static function remap_mention_user_ids_in_comment_html( string $html ) : string {
+        return (string) preg_replace_callback(
+            '/@?\[([^\]]*)\]\((\d+)\)/',
+            static function ( array $m ) {
+                $old = (int) $m[2];
+                if ( $old <= 0 ) {
+                    return $m[0];
+                }
+                $new    = Disciple_Tools_Migration_System_Users::remap_user_id( $old );
+                $prefix = isset( $m[0][0] ) && $m[0][0] === '@' ? '@' : '';
+                return $prefix . '[' . $m[1] . '](' . $new . ')';
+            },
+            $html
+        );
+    }
+
+    /**
+     * Creates comments from an export payload (Phase 2b).
+     *
+     * @param string $post_type
+     * @param int    $post_id
+     * @param array  $comments Rows from dt_migration_comments.
+     * @return array<int, string> Error messages.
+     */
+    private static function import_record_comments( string $post_type, int $post_id, array $comments ) : array {
+        $errors = [];
+        if ( empty( $comments ) || ! class_exists( 'DT_Posts' ) ) {
+            return $errors;
+        }
+        $index = 0;
+        foreach ( $comments as $row ) {
+            ++$index;
+            if ( ! is_array( $row ) ) {
+                continue;
+            }
+            $content = isset( $row['comment_content'] ) ? (string) $row['comment_content'] : '';
+            if ( $content === '' ) {
+                continue;
+            }
+            $content = self::remap_mention_user_ids_in_comment_html( $content );
+
+            $source_uid = isset( $row['user_id'] ) ? (int) $row['user_id'] : 0;
+            $new_uid    = $source_uid > 0 ? Disciple_Tools_Migration_System_Users::remap_user_id( $source_uid ) : 0;
+
+            $type = isset( $row['comment_type'] ) ? sanitize_key( (string) $row['comment_type'] ) : 'comment';
+            if ( strlen( $type ) > 20 ) {
+                $type = substr( $type, 0, 20 );
+            }
+
+            $args = [];
+            if ( $new_uid > 0 ) {
+                $args['user_id'] = $new_uid;
+            }
+            if ( ! empty( $row['comment_author'] ) ) {
+                $args['comment_author'] = sanitize_text_field( (string) $row['comment_author'] );
+            }
+            if ( ! empty( $row['comment_date'] ) && function_exists( 'dt_validate_date' ) && dt_validate_date( (string) $row['comment_date'] ) ) {
+                $args['comment_date'] = (string) $row['comment_date'];
+            }
+
+            $comment_meta = [];
+            if ( ! empty( $row['comment_reactions'] ) && is_array( $row['comment_reactions'] ) ) {
+                foreach ( $row['comment_reactions'] as $reaction_key => $reactors ) {
+                    if ( strpos( (string) $reaction_key, 'reaction' ) !== 0 ) {
+                        continue;
+                    }
+                    if ( ! is_array( $reactors ) ) {
+                        continue;
+                    }
+                    foreach ( $reactors as $r ) {
+                        if ( ! is_array( $r ) ) {
+                            continue;
+                        }
+                        $rid = isset( $r['user_id'] ) ? (int) $r['user_id'] : 0;
+                        if ( $rid <= 0 ) {
+                            continue;
+                        }
+                        $mapped = Disciple_Tools_Migration_System_Users::remap_user_id( $rid );
+                        if ( $mapped <= 0 ) {
+                            continue;
+                        }
+                        if ( ! isset( $comment_meta[ $reaction_key ] ) ) {
+                            $comment_meta[ $reaction_key ] = [];
+                        }
+                        $comment_meta[ $reaction_key ][] = $mapped;
+                    }
+                }
+            }
+            if ( ! empty( $row['comment_meta'] ) && is_array( $row['comment_meta'] ) ) {
+                foreach ( $row['comment_meta'] as $mk => $entries ) {
+                    $mk = (string) $mk;
+                    if ( strpos( $mk, 'reaction' ) === 0 ) {
+                        continue;
+                    }
+                    if ( ! is_array( $entries ) ) {
+                        continue;
+                    }
+                    foreach ( $entries as $ent ) {
+                        if ( ! is_array( $ent ) || ! array_key_exists( 'value', $ent ) ) {
+                            continue;
+                        }
+                        if ( ! isset( $comment_meta[ $mk ] ) ) {
+                            $comment_meta[ $mk ] = [];
+                        }
+                        $comment_meta[ $mk ][] = wp_unslash( $ent['value'] );
+                    }
+                }
+            }
+            if ( ! empty( $comment_meta ) ) {
+                $args['comment_meta'] = $comment_meta;
+            }
+
+            $created = DT_Posts::add_post_comment( $post_type, $post_id, $content, $type, $args, false, true );
+            if ( is_wp_error( $created ) ) {
+                $errors[] = sprintf(
+                    /* translators: 1: comment index, 2: post type, 3: post ID, 4: error message */
+                    __( 'Comment #%1$d on %2$s #%3$d: %4$s', 'disciple-tools-migration' ),
+                    $index,
+                    $post_type,
+                    $post_id,
+                    $created->get_error_message()
+                );
+            }
+        }
+        return $errors;
+    }
+
+    /**
      * Normalizes a field value from export format to DT_Posts update format.
      *
      * Export returns key_select as { key, label }; DT expects the key string.
      * Export returns user_select as { assigned-to, id, display }; DT expects assigned-to value.
+     * Prefer {@see normalize_and_remap_user_select_for_import()} for user_select during migration.
      *
      * @param mixed $value
      * @return mixed
@@ -725,16 +970,23 @@ class Disciple_Tools_Migration_Import_Engine {
             'post_date_formatted',
             'post_author',
             'post_author_display_name',
+            'dt_migration_comments',
         ];
-        $connection_types = [];
-        $multi_select_types = [];
+        $connection_types     = [];
+        $multi_select_types   = [];
+        $user_select_types    = [];
         if ( class_exists( 'DT_Posts' ) ) {
-            $post_settings     = DT_Posts::get_post_settings( $post_type, false );
-            $connection_types = (array) ( $post_settings['connection_types'] ?? [] );
-            $field_settings   = (array) ( $post_settings['fields'] ?? [] );
+            $post_settings      = DT_Posts::get_post_settings( $post_type, false );
+            $connection_types   = (array) ( $post_settings['connection_types'] ?? [] );
+            $field_settings     = (array) ( $post_settings['fields'] ?? [] );
             $values_based_types = [ 'multi_select', 'tags', 'location', 'location_meta' ];
             foreach ( $field_settings as $fk => $fs ) {
-                if ( isset( $fs['type'] ) && in_array( $fs['type'], $values_based_types, true ) ) {
+                if ( ! isset( $fs['type'] ) ) {
+                    continue;
+                }
+                if ( $fs['type'] === 'user_select' ) {
+                    $user_select_types[] = $fk;
+                } elseif ( in_array( $fs['type'], $values_based_types, true ) ) {
                     $multi_select_types[] = $fk;
                 }
             }
@@ -748,6 +1000,8 @@ class Disciple_Tools_Migration_Import_Engine {
                 $fields[ $key ] = self::normalize_connection_for_import( $value );
             } elseif ( in_array( $key, $multi_select_types, true ) ) {
                 $fields[ $key ] = self::normalize_multi_select_for_import( $value );
+            } elseif ( in_array( $key, $user_select_types, true ) ) {
+                $fields[ $key ] = self::normalize_and_remap_user_select_for_import( $value );
             } else {
                 $fields[ $key ] = self::normalize_field_value_for_import( $value );
             }
@@ -792,16 +1046,30 @@ class Disciple_Tools_Migration_Import_Engine {
      * @param string $post_type
      * @param int    $post_id   Desired post ID.
      * @param array  $fields    Prepared fields from prepare_record_fields_for_import.
+     * @param int    $post_author_id Remapped WordPress user ID for post_author (0 = use current user on insert, unchanged on update).
      *
      * @return true|WP_Error
      */
-    private static function insert_or_update_post( string $post_type, int $post_id, array $fields ) {
-        $existing = get_post( $post_id );
+    private static function insert_or_update_post( string $post_type, int $post_id, array $fields, int $post_author_id = 0 ) {
+        $existing       = get_post( $post_id );
+        $author_for_ins = $post_author_id > 0 ? $post_author_id : get_current_user_id();
+
         $run_update = function () use ( $post_type, $post_id, $fields ) {
             return DT_Posts::update_post( $post_type, $post_id, $fields, true, false );
         };
 
         if ( $existing && get_post_type( $post_id ) === $post_type ) {
+            if ( $post_author_id > 0 && (int) $existing->post_author !== $post_author_id ) {
+                wp_update_post(
+                    wp_slash(
+                        [
+                            'ID'          => $post_id,
+                            'post_author' => $post_author_id,
+                        ]
+                    ),
+                    true
+                );
+            }
             self::$during_record_import = true;
             add_filter( 'get_post_metadata', [ self::class, 'filter_details_meta_during_import' ], 10, 5 );
             try {
@@ -822,6 +1090,7 @@ class Disciple_Tools_Migration_Import_Engine {
             'post_title'  => $title,
             'post_type'   => $post_type,
             'post_status' => $fields['post_status'] ?? 'publish',
+            'post_author' => $author_for_ins,
         ];
 
         $inserted_id = wp_insert_post( $post_arr, true );

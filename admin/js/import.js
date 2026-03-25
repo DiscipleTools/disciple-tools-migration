@@ -38,6 +38,7 @@
         const parts = [];
         if ( settings.length ) {
             const labels = {
+                system_users: 'WordPress users (system)',
                 general_settings: 'General Settings',
                 custom_lists: 'Custom Lists',
                 tiles: 'Tiles',
