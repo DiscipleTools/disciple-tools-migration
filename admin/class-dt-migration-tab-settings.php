@@ -62,27 +62,6 @@ class Disciple_Tools_Migration_Tab_Settings {
                 </tr>
             <tr>
                 <td>
-                    <?php esc_html_e( 'Migration Type', 'disciple-tools-migration' ); ?>
-                </td>
-                <td>
-                    <fieldset>
-                        <label>
-                            <input type="radio" name="dt_migration_mode" value="api" <?php checked( $settings['mode'], 'api' ); ?> />
-                            <?php esc_html_e( 'API Endpoints (server-to-server)', 'disciple-tools-migration' ); ?>
-                        </label>
-                        <br>
-                        <label>
-                            <input type="radio" name="dt_migration_mode" value="file" <?php checked( $settings['mode'], 'file' ); ?> />
-                            <?php esc_html_e( 'Downloadable File (export/import via package)', 'disciple-tools-migration' ); ?>
-                        </label>
-                        <p class="description">
-                            <?php esc_html_e( 'Choose how this site will exchange migration data with other Disciple.Tools sites.', 'disciple-tools-migration' ); ?>
-                        </p>
-                    </fieldset>
-                </td>
-            </tr>
-            <tr>
-                <td>
                     <?php esc_html_e( 'Settings & Admin Data', 'disciple-tools-migration' ); ?>
                 </td>
                 <td>
@@ -180,10 +159,6 @@ class Disciple_Tools_Migration_Tab_Settings {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
 
         $settings['enabled'] = isset( $post_vars['dt_migration_enabled'] ) && '1' === (string) $post_vars['dt_migration_enabled'];
-
-        if ( isset( $post_vars['dt_migration_mode'] ) && in_array( $post_vars['dt_migration_mode'], [ 'api', 'file' ], true ) ) {
-            $settings['mode'] = $post_vars['dt_migration_mode'];
-        }
 
         $allowed = $post_vars['dt_migration_allowed_items'] ?? [];
 

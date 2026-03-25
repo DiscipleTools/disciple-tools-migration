@@ -49,6 +49,13 @@ class Disciple_Tools_Migration_Tab_Import {
      */
     private $import_preview_user_count = 0;
 
+    /**
+     * Which import UI produced the current preview: 'api' or 'file'.
+     *
+     * @var string|null
+     */
+    private $import_preview_channel = null;
+
     public function content() {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
 
@@ -75,7 +82,7 @@ class Disciple_Tools_Migration_Tab_Import {
     }
 
     /**
-     * Renders the main Import tab content, depending on settings and mode.
+     * Renders the main Import tab content (API and file flows).
      *
      * @param array $settings
      */
@@ -96,17 +103,14 @@ class Disciple_Tools_Migration_Tab_Import {
                             <?php esc_html_e( 'Migration is currently disabled. Enable it on the Settings tab before running imports.', 'disciple-tools-migration' ); ?>
                         </p>
                     <?php else : ?>
-                        <?php if ( $settings['mode'] === 'api' ) : ?>
-                            <p>
-                                <?php esc_html_e( 'This site is configured to receive migration data from another Disciple.Tools site via API.', 'disciple-tools-migration' ); ?>
-                            </p>
-                            <p>
-                                <?php esc_html_e( 'In a future phase, this tab will provide controls to connect to a source site, preview the incoming payload, and then run a destructive import of the selected settings and records.', 'disciple-tools-migration' ); ?>
-                            </p>
-                            <p>
-                                <?php esc_html_e( 'Imports will delete existing records for the selected types before recreating them with preserved IDs from the source, so that internal connections remain valid.', 'disciple-tools-migration' ); ?>
-                            </p>
-                            <hr>
+                        <p>
+                            <?php esc_html_e( 'Use the API block below to pull from a live source site (Server A), or use the file block to upload a JSON export. The preview and Start Import button apply to whichever flow you used last (fetch or upload).', 'disciple-tools-migration' ); ?>
+                        </p>
+                        <p>
+                            <?php esc_html_e( 'Imports delete existing records for the selected types before recreating them with preserved IDs from the source, so that internal connections remain valid.', 'disciple-tools-migration' ); ?>
+                        </p>
+                        <hr>
+                        <div class="dt-migration-import-section" data-import-channel="api">
                             <h3><?php esc_html_e( 'API Connection to Source Site (Server A)', 'disciple-tools-migration' ); ?></h3>
                             <p>
                                 <?php esc_html_e( 'Use this form to test a connection to the source Disciple.Tools site using JWT authentication and fetch its migration capabilities. This operation is non-destructive.', 'disciple-tools-migration' ); ?>
@@ -190,7 +194,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                         <td><?php echo ! empty( $this->connection_result['enabled'] ) ? esc_html__( 'Yes', 'disciple-tools-migration' ) : esc_html__( 'No', 'disciple-tools-migration' ); ?></td>
                                     </tr>
                                     <tr>
-                                        <td><?php esc_html_e( 'Migration Mode', 'disciple-tools-migration' ); ?></td>
+                                        <td><?php esc_html_e( 'Migration channels (reported)', 'disciple-tools-migration' ); ?></td>
                                         <td><?php echo esc_html( $this->connection_result['mode'] ?? '' ); ?></td>
                                     </tr>
                                     <tr>
@@ -251,7 +255,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                     </button>
                                 </form>
                             <?php endif; ?>
-                            <?php if ( ! empty( $this->settings_preview ) ) : ?>
+                            <?php if ( ! empty( $this->settings_preview ) && $this->import_preview_channel === 'api' ) : ?>
                                 <h3><?php esc_html_e( 'Server A Settings Export Preview', 'disciple-tools-migration' ); ?></h3>
 
                                 <?php
@@ -353,20 +357,17 @@ class Disciple_Tools_Migration_Tab_Import {
                                 </table>
 
                                 <p style="margin-top: 16px;">
-                                    <button type="button" class="button button-primary dt-migration-start-import">
+                                    <button type="button" class="button button-primary dt-migration-start-import" data-import-channel="api">
                                         <?php esc_html_e( 'Start Import', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
-                                <?php
-                                $this->render_import_modal_and_progress();
-                                ?>
                             <?php endif; ?>
-                        <?php else : ?>
+                        </div>
+                        <hr style="margin: 28px 0;">
+                        <div class="dt-migration-import-section" data-import-channel="file">
+                            <h3><?php esc_html_e( 'Upload & preview (JSON file)', 'disciple-tools-migration' ); ?></h3>
                             <p>
-                                <?php esc_html_e( 'This site is configured to import migration packages from a downloadable JSON file.', 'disciple-tools-migration' ); ?>
-                            </p>
-                            <p>
-                                <?php esc_html_e( 'Upload a migration export file to preview its contents and run an import.', 'disciple-tools-migration' ); ?>
+                                <?php esc_html_e( 'Upload a migration export JSON file from another Disciple.Tools site, then preview and import.', 'disciple-tools-migration' ); ?>
                             </p>
                             <?php if ( ! empty( $this->connection_error ) ) : ?>
                                 <div class="notice notice-error" style="margin-top:10px;">
@@ -397,7 +398,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                     </tbody>
                                 </table>
                             </form>
-                            <?php if ( ! empty( $this->settings_preview ) ) : ?>
+                            <?php if ( ! empty( $this->settings_preview ) && $this->import_preview_channel === 'file' ) : ?>
                                 <h3 style="margin-top: 24px;"><?php esc_html_e( 'File Contents Preview', 'disciple-tools-migration' ); ?></h3>
                                 <?php
                                 $allowed          = $this->export_allowed_items ?? [];
@@ -475,12 +476,14 @@ class Disciple_Tools_Migration_Tab_Import {
                                     </tbody>
                                 </table>
                                 <p style="margin-top: 16px;">
-                                    <button type="button" class="button button-primary dt-migration-start-import">
+                                    <button type="button" class="button button-primary dt-migration-start-import" data-import-channel="file">
                                         <?php esc_html_e( 'Start Import', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
-                                <?php $this->render_import_modal_and_progress(); ?>
                             <?php endif; ?>
+                        </div>
+                        <?php if ( ! empty( $this->settings_preview ) ) : ?>
+                            <?php $this->render_import_modal_and_progress(); ?>
                         <?php endif; ?>
                     <?php endif; ?>
                 </td>
@@ -513,7 +516,7 @@ class Disciple_Tools_Migration_Tab_Import {
                         <?php esc_html_e( 'Imports will be destructive for the selected entities on this site. Confirmation flows and safety checks will be added alongside the actual import engine in later phases.', 'disciple-tools-migration' ); ?>
                     </p>
                     <p>
-                        <?php esc_html_e( 'For now, use this tab to confirm the intended mode (API vs file) and to reason about which settings and record types should be included when we wire up the actual import steps.', 'disciple-tools-migration' ); ?>
+                        <?php esc_html_e( 'Use the API or file path on this tab, then select which settings and record types to include before starting an import.', 'disciple-tools-migration' ); ?>
                     </p>
                 </td>
             </tr>
@@ -588,11 +591,12 @@ class Disciple_Tools_Migration_Tab_Import {
     }
 
     /**
-     * Processes the Import tab forms for API mode.
+     * Processes Import tab forms (connection / preview and file upload).
      *
-     * Handles both:
+     * Handles:
      * - "Test Connection & Fetch Capabilities"
      * - "Fetch Settings Export Preview"
+     * - File upload & preview
      *
      * @param array $settings
      */
@@ -601,12 +605,8 @@ class Disciple_Tools_Migration_Tab_Import {
             return;
         }
 
-        if ( $settings['mode'] === 'file' ) {
+        if ( isset( $_POST['dt_migration_file_upload_nonce'] ) ) {
             $this->process_file_upload( $settings );
-            return;
-        }
-
-        if ( $settings['mode'] !== 'api' ) {
             return;
         }
 
@@ -716,6 +716,8 @@ class Disciple_Tools_Migration_Tab_Import {
 
             $this->records_preview = $preview_records;
 
+            $this->import_preview_channel = 'api';
+
             return;
         }
 
@@ -792,6 +794,9 @@ class Disciple_Tools_Migration_Tab_Import {
         // Always clear previous preview when re-submitting the form.
         $this->settings_preview           = null;
         $this->import_preview_user_count = 0;
+        $this->import_preview_channel     = null;
+        $this->records_preview            = null;
+        $this->export_allowed_items       = null;
 
         // Default action: fetch capabilities only.
         $capabilities_url = $base . '/wp-json/dt-migration/v1/capabilities';
@@ -894,5 +899,7 @@ class Disciple_Tools_Migration_Tab_Import {
         foreach ( $records_raw as $post_type => $recs ) {
             $this->records_preview[ $post_type ] = [ 'count' => is_array( $recs ) ? count( $recs ) : 0 ];
         }
+
+        $this->import_preview_channel = 'file';
     }
 }

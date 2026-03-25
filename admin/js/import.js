@@ -13,20 +13,23 @@
     let currentPhaseIndex = 0;
     let totalSteps = 0;
     let completedSteps = 0;
+    let activeImportChannel = 'api';
 
     const CONFIRM_WORD = 'IMPORT';
 
-    function getSelectedSettings() {
+    function getSelectedSettings( $scope ) {
+        const root = $scope && $scope.length ? $scope : $( document );
         const out = [];
-        $( '.dt-migration-setting-checkbox:checked:not(:disabled)' ).each( function() {
+        root.find( '.dt-migration-setting-checkbox:checked:not(:disabled)' ).each( function() {
             out.push( $( this ).val() );
         } );
         return out;
     }
 
-    function getSelectedRecords() {
+    function getSelectedRecords( $scope ) {
+        const root = $scope && $scope.length ? $scope : $( document );
         const out = {};
-        $( '.dt-migration-record-checkbox:checked' ).each( function() {
+        root.find( '.dt-migration-record-checkbox:checked' ).each( function() {
             const pt = $( this ).data( 'post-type' );
             const count = $( this ).data( 'record-count' ) || 0;
             out[ pt ] = { count };
@@ -56,13 +59,13 @@
         return parts.join( '. ' );
     }
 
-    function buildPhases() {
-        const settings = getSelectedSettings();
-        const records = getSelectedRecords();
-        const phases = [];
+    function buildPhases( $section ) {
+        const settings = getSelectedSettings( $section );
+        const records = getSelectedRecords( $section );
+        const phasesOut = [];
 
         if ( settings.length ) {
-            phases.push( {
+            phasesOut.push( {
                 type: 'settings',
                 label: 'Import settings (' + settings.join( ', ' ) + ')',
                 settings: settings,
@@ -74,7 +77,7 @@
         const ordered = order.filter( pt => records[ pt ] ).concat( rest );
         ordered.forEach( pt => {
             if ( records[ pt ] ) {
-                phases.push( {
+                phasesOut.push( {
                     type: 'records',
                     post_type: pt,
                     label: 'Import ' + pt + ' (' + ( records[ pt ].count || 0 ) + ' records)',
@@ -82,14 +85,15 @@
                 } );
             }
         } );
-        return phases;
+        return phasesOut;
     }
 
     function getPhaseConfirmMessage( phase ) {
         if ( phase.type === 'settings' ) {
             return 'This will overwrite the selected settings on this site.';
         }
-        return 'This will delete existing ' + phase.post_type + ' and replace them with records from Server A. Record IDs will be preserved for relationships.';
+        const source = activeImportChannel === 'file' ? 'the uploaded export file' : 'Server A';
+        return 'This will delete existing ' + phase.post_type + ' and replace them with records from ' + source + '. Record IDs will be preserved for relationships.';
     }
 
     function setProgress( percent ) {
@@ -148,6 +152,7 @@
                 $.post( dtMigrationImport.ajaxUrl, {
                     action: 'dt_migration_import_batch',
                     nonce: dtMigrationImport.nonce,
+                    import_channel: activeImportChannel,
                     step: 'settings',
                     settings_selected: phase.settings
                 } ).done( function( r ) {
@@ -175,6 +180,7 @@
                     $.post( dtMigrationImport.ajaxUrl, {
                         action: 'dt_migration_import_batch',
                         nonce: dtMigrationImport.nonce,
+                        import_channel: activeImportChannel,
                         step: 'records',
                         post_type: phase.post_type,
                         offset: offset
@@ -300,13 +306,17 @@
         } );
 
         $( '.dt-migration-start-import' ).on( 'click', function() {
-            const settings = getSelectedSettings();
-            const records = getSelectedRecords();
+            const $section = $( this ).closest( '.dt-migration-import-section' );
+            const fromBtn = $( this ).data( 'importChannel' );
+            activeImportChannel = fromBtn === 'file' ? 'file' : 'api';
+
+            const settings = getSelectedSettings( $section );
+            const records = getSelectedRecords( $section );
             if ( ! settings.length && ! Object.keys( records ).length ) {
                 alert( 'Please select at least one setting type or record type to import.' );
                 return;
             }
-            phases = buildPhases();
+            phases = buildPhases( $section );
             if ( ! phases.length ) {
                 return;
             }
@@ -316,14 +326,16 @@
             showModal( phases[ 0 ] );
         } );
 
-        $( '.dt-migration-select-all-settings' ).on( 'change', function() {
+        $( document ).on( 'change', '.dt-migration-select-all-settings', function() {
+            const $section = $( this ).closest( '.dt-migration-import-section' );
             const checked = $( this ).prop( 'checked' );
-            $( '.dt-migration-setting-checkbox:not(:disabled)' ).prop( 'checked', checked );
+            $section.find( '.dt-migration-setting-checkbox:not(:disabled)' ).prop( 'checked', checked );
         } );
 
-        $( '.dt-migration-select-all-records' ).on( 'change', function() {
+        $( document ).on( 'change', '.dt-migration-select-all-records', function() {
+            const $section = $( this ).closest( '.dt-migration-import-section' );
             const checked = $( this ).prop( 'checked' );
-            $( '.dt-migration-record-checkbox' ).prop( 'checked', checked );
+            $section.find( '.dt-migration-record-checkbox' ).prop( 'checked', checked );
         } );
     }
 

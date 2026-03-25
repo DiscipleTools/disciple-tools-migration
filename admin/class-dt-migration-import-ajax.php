@@ -96,16 +96,16 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'Migration is not enabled.', 'disciple-tools-migration' ) ] );
         }
 
-        $mode = $settings['mode'] ?? 'api';
-        $step = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : '';
-
-        if ( $mode === 'file' ) {
-            $this->handle_file_mode_batch( $step, $settings );
-            return;
+        $channel = isset( $_POST['import_channel'] ) ? sanitize_key( wp_unslash( $_POST['import_channel'] ) ) : '';
+        if ( $channel !== 'file' && $channel !== 'api' ) {
+            $channel = 'api';
         }
 
-        if ( $mode !== 'api' ) {
-            wp_send_json_error( [ 'message' => __( 'Migration mode not supported for import.', 'disciple-tools-migration' ) ] );
+        $step = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : '';
+
+        if ( $channel === 'file' ) {
+            $this->handle_file_mode_batch( $step, $settings );
+            return;
         }
 
         $remote_url = $settings['api']['remote_base_url'] ?? '';

@@ -117,13 +117,16 @@ class Disciple_Tools_Migration_Endpoints {
 
         $response = [
             'enabled'            => ! empty( $settings['enabled'] ),
-            'mode'               => $settings['mode'] ?? 'api',
+            // Both API and file export/import are always available; legacy stored settings may still contain mode.
+            'mode'               => 'both',
             'allowed_items'      => $settings['allowed_items'] ?? [],
             'site_meta'          => $this->get_site_meta(),
             'plugin_capabilities' => [
-                'supports_api_mode'  => true,
-                'supports_file_mode' => true,
-                'supports_records'   => [
+                'supports_api'          => true,
+                'supports_file_download' => true,
+                'supports_api_mode'     => true,
+                'supports_file_mode'    => true,
+                'supports_records'      => [
                     'contacts' => ! empty( $settings['allowed_items']['records']['contacts'] ),
                     'groups'   => ! empty( $settings['allowed_items']['records']['groups'] ),
                 ],
@@ -233,7 +236,7 @@ class Disciple_Tools_Migration_Endpoints {
             'site_meta' => $site_meta,
             'settings'  => [
                 'enabled'       => ! empty( $settings['enabled'] ),
-                'mode'          => $settings['mode'] ?? 'api',
+                'mode'          => 'both',
                 'allowed_items' => $allowed,
             ],
             'export'    => $export_out,

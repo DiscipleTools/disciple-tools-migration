@@ -49,10 +49,9 @@ class Disciple_Tools_Migration_Tab_Export {
                             <?php esc_html_e( 'Migration is currently disabled. Enable it on the Settings tab in order to generate exports.', 'disciple-tools-migration' ); ?>
                         </p>
                     <?php else : ?>
-                        <?php if ( $settings['mode'] === 'api' ) : ?>
-                            <p>
-                                <?php esc_html_e( 'This site (Server A) serves migration exports via API endpoints. A remote Disciple.Tools site (Server B) can connect and fetch the settings and records below.', 'disciple-tools-migration' ); ?>
-                            </p>
+                        <p>
+                            <?php esc_html_e( 'This site can share migration data in two ways: another Disciple.Tools site can connect over the API (preview below), or you can build a downloadable JSON package for offline transfer.', 'disciple-tools-migration' ); ?>
+                        </p>
                             <?php
                             $allowed          = $settings['allowed_items'] ?? [];
                             $settings_preview = $this->get_api_export_preview( $allowed );
@@ -141,13 +140,11 @@ class Disciple_Tools_Migration_Tab_Export {
                                     <?php esc_html_e( 'Enable settings and record types on the Settings tab to see what will be exported.', 'disciple-tools-migration' ); ?>
                                 </p>
                             <?php endif; ?>
-                        <?php else : ?>
-                            <p>
-                                <?php esc_html_e( 'This site is configured to export migration packages as downloadable JSON files.', 'disciple-tools-migration' ); ?>
-                            </p>
-                            <p>
-                                <?php esc_html_e( 'The export includes the settings and record types you have enabled on the Settings tab. By default all records of each type are included; use By Range or By limited records for advanced partial exports.', 'disciple-tools-migration' ); ?>
-                            </p>
+                        <hr style="margin: 28px 0;">
+                        <h3 style="margin-top: 0;"><?php esc_html_e( 'Download export (JSON)', 'disciple-tools-migration' ); ?></h3>
+                        <p>
+                            <?php esc_html_e( 'The file includes the settings and record types enabled on the Settings tab. By default all records of each type are included; use By Range or By limited records for advanced partial exports.', 'disciple-tools-migration' ); ?>
+                        </p>
                             <?php
                             $record_stats = Disciple_Tools_Migration_Export_File::get_record_stats();
                             if ( ! empty( $record_stats ) ) :
@@ -237,7 +234,6 @@ class Disciple_Tools_Migration_Tab_Export {
                                     <?php esc_html_e( 'No record types are enabled for export. Enable at least one record type on the Settings tab.', 'disciple-tools-migration' ); ?>
                                 </p>
                             <?php endif; ?>
-                        <?php endif; ?>
                     <?php endif; ?>
                 </td>
             </tr>
@@ -337,16 +333,7 @@ class Disciple_Tools_Migration_Tab_Export {
                         ?>
                     </p>
                     <p>
-                        <?php
-                        printf(
-                            /* translators: %s: migration mode label */
-                            esc_html__( 'Migration mode: %s', 'disciple-tools-migration' ),
-                            esc_html( $settings['mode'] === 'api' ? __( 'API Endpoints', 'disciple-tools-migration' ) : __( 'Downloadable File', 'disciple-tools-migration' ) )
-                        );
-                        ?>
-                    </p>
-                    <p>
-                        <?php esc_html_e( 'Export will eventually build on this configuration to produce either API responses or downloadable packages containing the selected settings and records.', 'disciple-tools-migration' ); ?>
+                        <?php esc_html_e( 'API exports use the migration REST namespace when the target site is connected and authenticated. File exports use the Download export section to produce a JSON package.', 'disciple-tools-migration' ); ?>
                     </p>
                 </td>
             </tr>

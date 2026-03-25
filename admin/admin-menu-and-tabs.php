@@ -67,6 +67,7 @@ class Disciple_Tools_Migration_Menu {
     public static function get_settings(): array {
         $defaults = [
             'enabled'       => false,
+            // Legacy option; UI no longer exposes a single "mode". Capabilities API reports both channels.
             'mode'          => 'api',
             'allowed_items' => [
                 'general_settings' => true,

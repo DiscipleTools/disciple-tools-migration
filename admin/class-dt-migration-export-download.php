@@ -34,8 +34,8 @@ class Disciple_Tools_Migration_Export_Download {
         }
 
         $settings = Disciple_Tools_Migration_Menu::get_settings();
-        if ( empty( $settings['enabled'] ) || $settings['mode'] !== 'file' ) {
-            wp_die( esc_html__( 'Migration is not enabled or not in file mode.', 'disciple-tools-migration' ) );
+        if ( empty( $settings['enabled'] ) ) {
+            wp_die( esc_html__( 'Migration is not enabled.', 'disciple-tools-migration' ) );
         }
 
         $record_options = [];
