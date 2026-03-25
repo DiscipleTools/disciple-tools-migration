@@ -4,7 +4,14 @@
 ( function( $ ) {
     'use strict';
 
-    let $modal, $progress, $confirmInput, $confirmBtn, $cancelBtn, $summary;
+    const strings = ( typeof dtMigrationImport !== 'undefined' && dtMigrationImport.strings ) ? dtMigrationImport.strings : {};
+
+    function t( key, fallback ) {
+        return strings[ key ] || fallback;
+    }
+
+    let $modal, $modalTitle, $progress, $confirmInput, $confirmBtn, $cancelBtn, $summary;
+    let $confirmGate, $modalWarning;
     let $progressBar, $progressText, $stepList, $currentPhase, $cancelImport;
     let $errorDetails, $errorScroll;
 
@@ -14,8 +21,15 @@
     let totalSteps = 0;
     let completedSteps = 0;
     let activeImportChannel = 'api';
+    let isSlimConfirmMode = false;
 
     const CONFIRM_WORD = 'IMPORT';
+
+    function escapeHtml( s ) {
+        const div = document.createElement( 'div' );
+        div.textContent = s == null ? '' : String( s );
+        return div.innerHTML;
+    }
 
     function getSelectedSettings( $scope ) {
         const root = $scope && $scope.length ? $scope : $( document );
@@ -35,28 +49,6 @@
             out[ pt ] = { count };
         } );
         return out;
-    }
-
-    function buildSummary( settings, records ) {
-        const parts = [];
-        if ( settings.length ) {
-            const labels = {
-                system_users: 'WordPress users (system)',
-                general_settings: 'General Settings',
-                custom_lists: 'Custom Lists',
-                tiles: 'Tiles',
-                fields: 'Fields',
-                roles: 'Roles',
-                workflows: 'Workflows'
-            };
-            const names = settings.map( s => labels[ s ] || s );
-            parts.push( 'Settings: ' + names.join( ', ' ) );
-        }
-        if ( Object.keys( records ).length ) {
-            const recParts = Object.keys( records ).map( pt => pt + ' (' + ( records[ pt ].count || 0 ) + ' records)' );
-            parts.push( 'Records: ' + recParts.join( ', ' ) );
-        }
-        return parts.join( '. ' );
     }
 
     function buildPhases( $section ) {
@@ -96,6 +88,41 @@
         return 'This will delete existing ' + phase.post_type + ' and replace them with records from ' + source + '. Record IDs will be preserved for relationships.';
     }
 
+    function buildSlimModalSummaryHtml( completedPhase, nextPhase ) {
+        const completedL = t( 'completedLabel', 'Completed:' );
+        const nextL = t( 'nextLabel', 'Next:' );
+        return (
+            '<p class="dt-migration-slim-completed"><strong>' + escapeHtml( completedL ) + '</strong> ' + escapeHtml( completedPhase.label ) + '</p>' +
+            '<p class="dt-migration-slim-next"><strong>' + escapeHtml( nextL ) + '</strong> ' + escapeHtml( nextPhase.label ) + '</p>' +
+            '<p class="dt-migration-slim-detail">' + escapeHtml( getPhaseConfirmMessage( nextPhase ) ) + '</p>'
+        );
+    }
+
+    function showFullModal( phase ) {
+        isSlimConfirmMode = false;
+        $modal.removeClass( 'dt-migration-modal--slim' );
+        $modalTitle.text( t( 'confirmImport', 'Confirm Import' ) );
+        $modalWarning.show();
+        $confirmGate.show();
+        $summary.text( getPhaseConfirmMessage( phase ) );
+        $confirmInput.val( '' ).prop( 'disabled', false );
+        $confirmBtn.text( t( 'confirm', 'Confirm' ) ).prop( 'disabled', true );
+        cancelled = false;
+        $modal.show();
+    }
+
+    function showSlimModal( completedPhase, nextPhase ) {
+        isSlimConfirmMode = true;
+        $modal.addClass( 'dt-migration-modal--slim' );
+        $modalTitle.text( t( 'continueImport', 'Continue import' ) );
+        $modalWarning.hide();
+        $confirmGate.hide();
+        $summary.html( buildSlimModalSummaryHtml( completedPhase, nextPhase ) );
+        $confirmBtn.text( t( 'continue', 'Continue' ) ).prop( 'disabled', false );
+        cancelled = false;
+        $modal.show();
+    }
+
     function setProgress( percent ) {
         const n = ( typeof percent === 'number' && ! isNaN( percent ) ) ? Math.round( percent ) : 0;
         $progressBar.css( 'width', n + '%' );
@@ -114,14 +141,6 @@
     function markStepActive( index ) {
         $stepList.find( 'li' ).removeClass( 'active' );
         $stepList.find( 'li' ).eq( index ).addClass( 'active' );
-    }
-
-    function showModal( phase ) {
-        $summary.text( getPhaseConfirmMessage( phase ) );
-        $confirmInput.val( '' ).prop( 'disabled', false );
-        $confirmBtn.prop( 'disabled', true );
-        cancelled = false;
-        $modal.show();
     }
 
     function hideModal() {
@@ -210,7 +229,6 @@
         } );
     }
 
-
     function startNextPhase() {
         if ( currentPhaseIndex >= phases.length ) {
             setProgress( 100 );
@@ -219,9 +237,11 @@
             return;
         }
         const phase = phases[ currentPhaseIndex ];
-        showModal( phase );
-        $confirmInput.val( '' );
-        $confirmBtn.prop( 'disabled', true );
+        if ( currentPhaseIndex === 0 ) {
+            showFullModal( phase );
+        } else {
+            showSlimModal( phases[ currentPhaseIndex - 1 ], phase );
+        }
     }
 
     function runCurrentPhase() {
@@ -254,6 +274,10 @@
     }
 
     function onConfirmClick() {
+        if ( isSlimConfirmMode ) {
+            runCurrentPhase();
+            return;
+        }
         const val = $confirmInput.val().trim().toUpperCase();
         if ( val === CONFIRM_WORD ) {
             runCurrentPhase();
@@ -262,6 +286,9 @@
 
     function init() {
         $modal = $( '#dt-migration-import-modal' );
+        $modalTitle = $( '#dt-migration-modal-title' );
+        $modalWarning = $( '.dt-migration-modal-warning' );
+        $confirmGate = $( '.dt-migration-modal-confirm-gate' );
         $progress = $( '#dt-migration-progress-panel' );
         $confirmInput = $( '#dt-migration-confirm-input' );
         $confirmBtn = $( '.dt-migration-modal-confirm' );
@@ -280,6 +307,9 @@
         }
 
         $confirmInput.on( 'input', function() {
+            if ( isSlimConfirmMode ) {
+                return;
+            }
             const val = $( this ).val().trim().toUpperCase();
             $confirmBtn.prop( 'disabled', val !== CONFIRM_WORD );
         } );
@@ -322,8 +352,8 @@
             }
             totalSteps = phases.length;
             currentPhaseIndex = 0;
-            $summary.text( buildSummary( settings, records ) );
-            showModal( phases[ 0 ] );
+            completedSteps = 0;
+            startNextPhase();
         } );
 
         $( document ).on( 'change', '.dt-migration-select-all-settings', function() {

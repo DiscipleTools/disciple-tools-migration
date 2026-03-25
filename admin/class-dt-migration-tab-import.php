@@ -536,7 +536,6 @@ class Disciple_Tools_Migration_Tab_Import {
         if ( empty( $this->settings_preview ) ) {
             return;
         }
-        $nonce = wp_create_nonce( 'dt_migration_import' );
         ?>
         <div id="dt-migration-import-modal" class="dt-migration-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="dt-migration-modal-title">
             <div class="dt-migration-modal-overlay"></div>
@@ -547,16 +546,18 @@ class Disciple_Tools_Migration_Tab_Import {
                         <?php esc_html_e( 'This action will overwrite existing settings and records on this site. It cannot be undone.', 'disciple-tools-migration' ); ?>
                     </p>
                     <div class="dt-migration-modal-summary"></div>
-                    <p>
-                        <label for="dt-migration-confirm-input">
-                            <?php esc_html_e( 'Type IMPORT to continue:', 'disciple-tools-migration' ); ?>
-                        </label>
-                    </p>
-                    <input type="text"
-                           id="dt-migration-confirm-input"
-                           class="dt-migration-confirm-input"
-                           autocomplete="off"
-                           placeholder="<?php esc_attr_e( 'IMPORT', 'disciple-tools-migration' ); ?>">
+                    <div class="dt-migration-modal-confirm-gate">
+                        <p>
+                            <label for="dt-migration-confirm-input">
+                                <?php esc_html_e( 'Type IMPORT to continue:', 'disciple-tools-migration' ); ?>
+                            </label>
+                        </p>
+                        <input type="text"
+                               id="dt-migration-confirm-input"
+                               class="dt-migration-confirm-input"
+                               autocomplete="off"
+                               placeholder="<?php esc_attr_e( 'IMPORT', 'disciple-tools-migration' ); ?>">
+                    </div>
                     <div class="dt-migration-modal-actions">
                         <button type="button" class="button dt-migration-modal-cancel">
                             <?php esc_html_e( 'Cancel', 'disciple-tools-migration' ); ?>

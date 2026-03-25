@@ -36,7 +36,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             'dt-migration-import',
             $plugin_url . 'admin/js/import.js',
             [ 'jquery' ],
-            '0.1',
+            '0.2.0',
             true
         );
         wp_localize_script(
@@ -45,6 +45,14 @@ class Disciple_Tools_Migration_Import_Ajax {
             [
                 'ajaxUrl' => admin_url( 'admin-ajax.php' ),
                 'nonce'   => wp_create_nonce( 'dt_migration_import' ),
+                'strings' => [
+                    'continue'       => __( 'Continue', 'disciple-tools-migration' ),
+                    'confirm'        => __( 'Confirm', 'disciple-tools-migration' ),
+                    'completedLabel' => __( 'Completed:', 'disciple-tools-migration' ),
+                    'nextLabel'      => __( 'Next:', 'disciple-tools-migration' ),
+                    'continueImport' => __( 'Continue import', 'disciple-tools-migration' ),
+                    'confirmImport'  => __( 'Confirm Import', 'disciple-tools-migration' ),
+                ],
             ]
         );
         wp_add_inline_style( 'wp-admin', $this->get_modal_css() );
@@ -63,6 +71,8 @@ class Disciple_Tools_Migration_Import_Ajax {
             .dt-migration-modal-body { margin-top: 16px; }
             .dt-migration-modal-warning { color: #b32d2e; font-weight: 600; }
             .dt-migration-modal-summary { margin: 12px 0; padding: 12px; background: #f0f0f1; border-radius: 4px; font-size: 13px; }
+            .dt-migration-modal--slim .dt-migration-modal-summary p { margin: 0 0 10px; }
+            .dt-migration-modal--slim .dt-migration-modal-summary p:last-child { margin-bottom: 0; }
             .dt-migration-confirm-input { width: 100%; margin: 8px 0 16px; padding: 8px; }
             .dt-migration-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
             .dt-migration-progress-panel { margin-top: 20px; padding: 20px; background: #f6f7f7; border: 1px solid #c3c4c7; border-radius: 4px; }
