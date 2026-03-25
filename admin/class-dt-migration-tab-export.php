@@ -146,7 +146,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                 <?php esc_html_e( 'This site is configured to export migration packages as downloadable JSON files.', 'disciple-tools-migration' ); ?>
                             </p>
                             <p>
-                                <?php esc_html_e( 'The export includes the settings and record types you have enabled on the Settings tab. You can limit records or use ID ranges for batched exports.', 'disciple-tools-migration' ); ?>
+                                <?php esc_html_e( 'The export includes the settings and record types you have enabled on the Settings tab. By default all records of each type are included; use By Range or By limited records for advanced partial exports.', 'disciple-tools-migration' ); ?>
                             </p>
                             <?php
                             $record_stats = Disciple_Tools_Migration_Export_File::get_record_stats();
@@ -175,18 +175,19 @@ class Disciple_Tools_Migration_Tab_Export {
                                             <td><?php echo (int) $stat['min_id'] . ' &ndash; ' . (int) $stat['max_id']; ?></td>
                                             <td>
                                                 <select name="dt_migration_export_by[<?php echo esc_attr( $post_type ); ?>]" class="dt-migration-export-by" style="width: 100%;">
-                                                    <option value="range" selected><?php esc_html_e( 'By Range', 'disciple-tools-migration' ); ?></option>
+                                                    <option value="all" selected><?php esc_html_e( 'All', 'disciple-tools-migration' ); ?></option>
+                                                    <option value="range"><?php esc_html_e( 'By Range', 'disciple-tools-migration' ); ?></option>
                                                     <option value="limit"><?php esc_html_e( 'By Limited Records', 'disciple-tools-migration' ); ?></option>
                                                 </select>
                                             </td>
                                             <td>
-                                                <input type="number" class="dt-migration-export-limit" name="dt_migration_export_limit[<?php echo esc_attr( $post_type ); ?>]" value="" min="0" placeholder="<?php esc_attr_e( 'All', 'disciple-tools-migration' ); ?>" style="width:80px;" disabled>
+                                                <input type="number" class="dt-migration-export-limit" name="dt_migration_export_limit[<?php echo esc_attr( $post_type ); ?>]" value="" min="0" placeholder="<?php esc_attr_e( 'e.g. 100', 'disciple-tools-migration' ); ?>" style="width:80px;" disabled>
                                             </td>
                                             <td>
-                                                <input type="number" class="dt-migration-export-min-id" name="dt_migration_export_min_id[<?php echo esc_attr( $post_type ); ?>]" value="" min="0" placeholder="<?php echo (int) $stat['min_id']; ?>" style="width:80px;">
+                                                <input type="number" class="dt-migration-export-min-id" name="dt_migration_export_min_id[<?php echo esc_attr( $post_type ); ?>]" value="" min="0" placeholder="<?php echo (int) $stat['min_id']; ?>" style="width:80px;" disabled>
                                             </td>
                                             <td>
-                                                <input type="number" class="dt-migration-export-max-id" name="dt_migration_export_max_id[<?php echo esc_attr( $post_type ); ?>]" value="" min="0" placeholder="<?php echo (int) $stat['max_id']; ?>" style="width:80px;">
+                                                <input type="number" class="dt-migration-export-max-id" name="dt_migration_export_max_id[<?php echo esc_attr( $post_type ); ?>]" value="" min="0" placeholder="<?php echo (int) $stat['max_id']; ?>" style="width:80px;" disabled>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -207,7 +208,11 @@ class Disciple_Tools_Migration_Tab_Export {
                                     var $limit = $row.find( '.dt-migration-export-limit' );
                                     var $minId = $row.find( '.dt-migration-export-min-id' );
                                     var $maxId = $row.find( '.dt-migration-export-max-id' );
-                                    if ( mode === 'limit' ) {
+                                    if ( mode === 'all' ) {
+                                        $limit.prop( 'disabled', true ).val( '' );
+                                        $minId.prop( 'disabled', true ).val( '' );
+                                        $maxId.prop( 'disabled', true ).val( '' );
+                                    } else if ( mode === 'limit' ) {
                                         $limit.prop( 'disabled', false );
                                         $minId.prop( 'disabled', true ).val( '' );
                                         $maxId.prop( 'disabled', true ).val( '' );

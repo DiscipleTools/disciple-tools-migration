@@ -57,7 +57,17 @@ class Disciple_Tools_Migration_Export_Download {
             if ( ! $enabled ) {
                 continue;
             }
-            $mode   = isset( $export_by[ $post_type ] ) && $export_by[ $post_type ] === 'limit' ? 'limit' : 'range';
+            $raw_mode = isset( $export_by[ $post_type ] ) ? sanitize_key( (string) $export_by[ $post_type ] ) : 'all';
+            if ( $raw_mode === 'limit' ) {
+                $mode = 'limit';
+            } elseif ( $raw_mode === 'range' ) {
+                $mode = 'range';
+            } else {
+                $mode = 'all';
+            }
+            if ( $mode === 'all' ) {
+                continue;
+            }
             $limit  = $mode === 'limit' ? absint( $limits[ $post_type ] ?? 0 ) : 0;
             $min_id = $mode === 'range' ? absint( $min_ids[ $post_type ] ?? 0 ) : 0;
             $max_id = $mode === 'range' ? absint( $max_ids[ $post_type ] ?? 0 ) : 0;
