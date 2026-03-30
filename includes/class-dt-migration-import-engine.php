@@ -16,7 +16,7 @@ class Disciple_Tools_Migration_Import_Engine {
      *
      * @var string[]
      */
-    const POST_TYPE_ORDER = [ 'peoplegroups', 'contacts', 'groups', 'trainings' ];
+    const POST_TYPE_ORDER = [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
 
     /**
      * Whether we are currently in a record import (insert_or_update_post) call.
@@ -25,6 +25,25 @@ class Disciple_Tools_Migration_Import_Engine {
      * @var bool
      */
     private static $during_record_import = false;
+
+    /**
+     * Transient base for per-user deferred connection payloads (pass 2 applies these).
+     *
+     * @return string
+     */
+    private static function deferred_connections_transient_key() : string {
+        return 'dt_mig_def_conn_' . get_current_user_id();
+    }
+
+    /**
+     * Clears the deferred connection queue and legacy group-only transient.
+     *
+     * @return void
+     */
+    public static function clear_deferred_connection_queue() : void {
+        delete_transient( self::deferred_connections_transient_key() );
+        delete_transient( 'dt_migration_deferred_group_connections' );
+    }
 
     /**
      * Imports settings from an export payload.
@@ -298,23 +317,31 @@ class Disciple_Tools_Migration_Import_Engine {
     }
 
     /**
-     * Imports a batch of records for a post type.
+     * Imports a batch of records for a post type (pass 1: no connection fields).
      *
      * Preserves post IDs using import_id. Deletes existing records first when offset=0.
+     * Connection fields are queued and applied later via {@see apply_all_deferred_connections()}.
      *
-     * @param string $post_type Post type.
-     * @param array  $records   Array of post data from DT_Posts::get_post.
-     * @param int    $offset    Batch offset (0 = first batch, delete existing first).
+     * @param string $post_type                 Post type.
+     * @param array  $records                   Array of post data from DT_Posts::get_post.
+     * @param int    $offset                   Batch offset (0 = first batch, delete existing first).
+     * @param bool   $clear_connection_queue_first When true, clears deferred connection queue (first records batch of a run without prior settings import).
      *
-     * @return array{ imported: int, errors: array }
+     * @return array{ imported: int, errors: array, fatal: bool }
      */
-    public static function import_records_batch( string $post_type, array $records, int $offset = 0 ) : array {
+    public static function import_records_batch( string $post_type, array $records, int $offset = 0, bool $clear_connection_queue_first = false ) : array {
         $result = [
             'imported' => 0,
             'errors'   => [],
+            'fatal'    => false,
         ];
 
+        if ( $clear_connection_queue_first ) {
+            self::clear_deferred_connection_queue();
+        }
+
         if ( ! class_exists( 'DT_Posts' ) ) {
+            $result['fatal']    = true;
             $result['errors'][] = __( 'DT_Posts not available.', 'disciple-tools-migration' );
             return $result;
         }
@@ -323,21 +350,13 @@ class Disciple_Tools_Migration_Import_Engine {
         if ( $offset === 0 ) {
             $deleted = self::delete_posts_by_type( $post_type );
             if ( $deleted < 0 ) {
+                $result['fatal']    = true;
                 $result['errors'][] = __( 'Failed to clear existing records.', 'disciple-tools-migration' );
                 return $result;
             }
-            if ( $post_type === 'groups' ) {
-                delete_transient( 'dt_migration_deferred_group_connections' );
-            }
         }
 
-        $group_conn_keys = [ 'parent_groups', 'child_groups', 'peer_groups' ];
-
         $records = self::sort_records_by_connection_deps( $post_type, $records );
-
-        $deferred_connections = ( $post_type === 'groups' )
-            ? ( array ) ( get_transient( 'dt_migration_deferred_group_connections' ) ?: [] )
-            : [];
 
         foreach ( $records as $record ) {
             $post_id = isset( $record['ID'] ) ? (int) $record['ID'] : 0;
@@ -350,17 +369,10 @@ class Disciple_Tools_Migration_Import_Engine {
             $fields = self::prepare_record_fields_for_import( $record, $post_type );
             $fields = self::filter_fields_for_target( $post_type, $fields );
 
-            if ( $post_type === 'groups' ) {
-                $deferred = [];
-                foreach ( $group_conn_keys as $key ) {
-                    if ( isset( $fields[ $key ] ) && is_array( $fields[ $key ] ) && ! empty( $fields[ $key ]['values'] ) ) {
-                        $deferred[ $key ] = $fields[ $key ];
-                        unset( $fields[ $key ] );
-                    }
-                }
-                if ( ! empty( $deferred ) ) {
-                    $deferred_connections[ $post_id ] = $deferred;
-                }
+            $split = self::split_connection_fields( $post_type, $fields );
+            $fields = $split['base'];
+            if ( ! empty( $split['connection'] ) ) {
+                self::merge_connections_into_deferred_queue( $post_type, $post_id, $split['connection'] );
             }
 
             $err = self::insert_or_update_post( $post_type, $post_id, $fields, $mapped_author );
@@ -383,81 +395,241 @@ class Disciple_Tools_Migration_Import_Engine {
             }
         }
 
-        if ( $post_type === 'groups' && ! empty( $deferred_connections ) ) {
-            set_transient( 'dt_migration_deferred_group_connections', $deferred_connections, HOUR_IN_SECONDS );
-        }
-
         return $result;
     }
 
     /**
-     * Filters connection field values to only include target IDs that exist.
+     * Removes connection-typed fields for pass 1; values are applied in pass 2.
      *
-     * Prevents "Error adding connection" when the target post was not imported
-     * (e.g. filtered out of export, failed import, or different batch).
+     * @param string $post_type Post type.
+     * @param array  $fields    Fields prepared for import.
      *
-     * @param array  $conn_fields Connection fields: { parent_groups: [...], child_groups: [...], ... }.
-     * @param string $post_type   Expected post type of target (e.g. 'groups').
-     * @return array Filtered connection fields with invalid targets removed.
+     * @return array{ base: array, connection: array }
      */
-    private static function filter_connection_values_to_existing_posts( array $conn_fields, string $post_type ) : array {
-        $filtered = [];
-        foreach ( $conn_fields as $field_key => $field_data ) {
-            if ( ! is_array( $field_data ) || empty( $field_data['values'] ) ) {
+    private static function split_connection_fields( string $post_type, array $fields ) : array {
+        $connection = [];
+        $base       = $fields;
+
+        if ( ! class_exists( 'DT_Posts' ) || empty( $fields ) ) {
+            return [ 'base' => $fields, 'connection' => [] ];
+        }
+
+        try {
+            $post_settings = DT_Posts::get_post_settings( $post_type, false );
+            $field_defs    = $post_settings['fields'] ?? [];
+        } catch ( Throwable $e ) {
+            return [ 'base' => $fields, 'connection' => [] ];
+        }
+
+        foreach ( array_keys( $fields ) as $key ) {
+            if ( isset( $field_defs[ $key ]['type'] ) && $field_defs[ $key ]['type'] === 'connection' ) {
+                $connection[ $key ] = $fields[ $key ];
+                unset( $base[ $key ] );
+            }
+        }
+
+        return [ 'base' => $base, 'connection' => $connection ];
+    }
+
+    /**
+     * Merges connection fields for one post into the deferred queue transient.
+     *
+     * @param string $post_type       Post type.
+     * @param int    $post_id         Post ID.
+     * @param array  $connection_fields Field key => connection payload.
+     *
+     * @return void
+     */
+    private static function merge_connections_into_deferred_queue( string $post_type, int $post_id, array $connection_fields ) : void {
+        if ( $post_id <= 0 || empty( $connection_fields ) ) {
+            return;
+        }
+
+        $key   = $post_type . ':' . $post_id;
+        $queue = get_transient( self::deferred_connections_transient_key() );
+        if ( ! is_array( $queue ) ) {
+            $queue = [];
+        }
+
+        if ( ! isset( $queue[ $key ] ) || ! is_array( $queue[ $key ] ) ) {
+            $queue[ $key ] = [];
+        }
+
+        self::merge_connection_field_values( $queue[ $key ], $connection_fields );
+
+        set_transient( self::deferred_connections_transient_key(), $queue, HOUR_IN_SECONDS );
+    }
+
+    /**
+     * Deep-merges connection field structures (combines values by target ID).
+     *
+     * @param array $bucket   Existing field key => data (modified in place).
+     * @param array $incoming New connection fields to merge.
+     *
+     * @return void
+     */
+    private static function merge_connection_field_values( array &$bucket, array $incoming ) : void {
+        foreach ( $incoming as $fk => $data ) {
+            if ( ! is_array( $data ) ) {
                 continue;
             }
-            $valid = [];
-            foreach ( $field_data['values'] as $item ) {
-                $target_id = isset( $item['value'] ) ? (int) $item['value'] : 0;
-                if ( $target_id <= 0 ) {
+            if ( ! isset( $bucket[ $fk ] ) ) {
+                $bucket[ $fk ] = $data;
+                continue;
+            }
+
+            $old_vals = isset( $bucket[ $fk ]['values'] ) && is_array( $bucket[ $fk ]['values'] ) ? $bucket[ $fk ]['values'] : [];
+            $new_vals = isset( $data['values'] ) && is_array( $data['values'] ) ? $data['values'] : [];
+            $by_id    = [];
+
+            foreach ( $old_vals as $item ) {
+                if ( ! is_array( $item ) ) {
                     continue;
                 }
-                if ( get_post_type( $target_id ) === $post_type ) {
+                $vid = isset( $item['value'] ) ? (int) $item['value'] : 0;
+                if ( $vid > 0 ) {
+                    $by_id[ $vid ] = $item;
+                }
+            }
+            foreach ( $new_vals as $item ) {
+                if ( ! is_array( $item ) ) {
+                    continue;
+                }
+                $vid = isset( $item['value'] ) ? (int) $item['value'] : 0;
+                if ( $vid > 0 ) {
+                    $by_id[ $vid ] = $item;
+                }
+            }
+
+            $merged            = array_merge( $bucket[ $fk ], $data );
+            $merged['values'] = array_values( $by_id );
+            $bucket[ $fk ]     = $merged;
+        }
+    }
+
+    /**
+     * Drops connection targets that do not exist as the field's expected post type.
+     *
+     * @param string $source_post_type Post type of the record being updated.
+     * @param array  $conn_fields      Connection fields only.
+     *
+     * @return array
+     */
+    private static function filter_connection_fields_by_field_settings( string $source_post_type, array $conn_fields ) : array {
+        if ( ! class_exists( 'DT_Posts' ) || empty( $conn_fields ) ) {
+            return [];
+        }
+
+        try {
+            $post_settings = DT_Posts::get_post_settings( $source_post_type, false );
+            $field_defs    = $post_settings['fields'] ?? [];
+        } catch ( Throwable $e ) {
+            return [];
+        }
+
+        $filtered = [];
+        foreach ( $conn_fields as $field_key => $field_data ) {
+            if ( ! isset( $field_defs[ $field_key ] ) || ( $field_defs[ $field_key ]['type'] ?? '' ) !== 'connection' ) {
+                continue;
+            }
+            if ( ! is_array( $field_data ) || empty( $field_data['values'] ) || ! is_array( $field_data['values'] ) ) {
+                continue;
+            }
+
+            $target_pt = $field_defs[ $field_key ]['post_type'] ?? $source_post_type;
+            $valid     = [];
+
+            foreach ( $field_data['values'] as $item ) {
+                if ( ! is_array( $item ) ) {
+                    continue;
+                }
+                $tid = isset( $item['value'] ) ? (int) $item['value'] : 0;
+                if ( $tid <= 0 ) {
+                    continue;
+                }
+                if ( get_post_type( $tid ) === $target_pt ) {
                     $valid[] = $item;
                 }
             }
+
             if ( ! empty( $valid ) ) {
                 $filtered[ $field_key ] = array_merge( $field_data, [ 'values' => $valid ] );
             }
         }
+
         return $filtered;
     }
 
     /**
-     * Applies deferred group-to-group connections after all groups have been imported.
-     *
-     * Called when the last batch of groups completes. All groups exist, so connections
-     * can be added without order dependencies.
+     * Pass 2: applies all deferred connection fields across imported post types.
      *
      * @return array{ applied: int, errors: array }
      */
-    public static function apply_deferred_group_connections() : array {
-        $stored = get_transient( 'dt_migration_deferred_group_connections' );
-        if ( ! is_array( $stored ) || empty( $stored ) ) {
-            return [ 'applied' => 0, 'errors' => [] ];
-        }
+    public static function apply_all_deferred_connections() : array {
+        $tkey   = self::deferred_connections_transient_key();
+        $stored = get_transient( $tkey );
+        delete_transient( $tkey );
         delete_transient( 'dt_migration_deferred_group_connections' );
 
         $result = [ 'applied' => 0, 'errors' => [] ];
+
+        if ( ! is_array( $stored ) || empty( $stored ) ) {
+            return $result;
+        }
+
         if ( ! class_exists( 'DT_Posts' ) ) {
             $result['errors'][] = __( 'DT_Posts not available.', 'disciple-tools-migration' );
             return $result;
         }
 
-        foreach ( $stored as $post_id => $conn_fields ) {
-            $post_id = (int) $post_id;
-            if ( $post_id <= 0 || get_post_type( $post_id ) !== 'groups' ) {
+        $order_map = array_flip( self::POST_TYPE_ORDER );
+        $keys      = array_keys( $stored );
+
+        usort(
+            $keys,
+            static function ( string $a, string $b ) use ( $order_map ) : int {
+                $pa = explode( ':', $a, 2 );
+                $pb = explode( ':', $b, 2 );
+                $ta = $pa[0] ?? '';
+                $tb = $pb[0] ?? '';
+                $ia = isset( $pa[1] ) ? (int) $pa[1] : 0;
+                $ib = isset( $pb[1] ) ? (int) $pb[1] : 0;
+                $oa = $order_map[ $ta ] ?? 100;
+                $ob = $order_map[ $tb ] ?? 100;
+                if ( $oa !== $ob ) {
+                    return $oa <=> $ob;
+                }
+                return $ia <=> $ib;
+            }
+        );
+
+        foreach ( $keys as $queue_key ) {
+            $parts = explode( ':', $queue_key, 2 );
+            if ( count( $parts ) < 2 ) {
                 continue;
             }
-            $conn_fields = self::filter_connection_values_to_existing_posts( $conn_fields, 'groups' );
+            $pt      = $parts[0];
+            $post_id = (int) $parts[1];
+            if ( $post_id <= 0 || get_post_type( $post_id ) !== $pt ) {
+                continue;
+            }
+
+            $conn_fields = $stored[ $queue_key ];
+            if ( ! is_array( $conn_fields ) ) {
+                continue;
+            }
+
+            $conn_fields = self::filter_connection_fields_by_field_settings( $pt, $conn_fields );
             if ( empty( $conn_fields ) ) {
                 continue;
             }
-            $err = DT_Posts::update_post( 'groups', $post_id, $conn_fields, true, false );
+
+            $err = DT_Posts::update_post( $pt, $post_id, $conn_fields, true, false );
             if ( is_wp_error( $err ) ) {
                 $result['errors'][] = sprintf(
-                    /* translators: 1: group ID, 2: error message */
-                    __( 'Failed to apply connections for group #%1$d: %2$s', 'disciple-tools-migration' ),
+                    /* translators: 1: post type, 2: post ID, 3: error message */
+                    __( 'Failed to apply connections for %1$s #%2$d: %3$s', 'disciple-tools-migration' ),
+                    $pt,
                     $post_id,
                     $err->get_error_message()
                 );
@@ -465,7 +637,17 @@ class Disciple_Tools_Migration_Import_Engine {
                 ++$result['applied'];
             }
         }
+
         return $result;
+    }
+
+    /**
+     * @deprecated Use {@see apply_all_deferred_connections()}. Kept for backward compatibility.
+     *
+     * @return array{ applied: int, errors: array }
+     */
+    public static function apply_deferred_group_connections() : array {
+        return self::apply_all_deferred_connections();
     }
 
     /**
@@ -724,6 +906,14 @@ class Disciple_Tools_Migration_Import_Engine {
 
             $source_uid = isset( $row['user_id'] ) ? (int) $row['user_id'] : 0;
             $new_uid    = $source_uid > 0 ? Disciple_Tools_Migration_System_Users::remap_user_id( $source_uid ) : 0;
+            // Remap may fall back to the source ID; that user often does not exist on the target.
+            // wp_check_comment_data() calls get_userdata() and then ->has_cap(); false is fatal.
+            if ( $new_uid > 0 ) {
+                $comment_user = get_userdata( $new_uid );
+                if ( ! $comment_user instanceof WP_User ) {
+                    $new_uid = 0;
+                }
+            }
 
             $type = isset( $row['comment_type'] ) ? sanitize_key( (string) $row['comment_type'] ) : 'comment';
             if ( strlen( $type ) > 20 ) {
@@ -760,6 +950,10 @@ class Disciple_Tools_Migration_Import_Engine {
                         }
                         $mapped = Disciple_Tools_Migration_System_Users::remap_user_id( $rid );
                         if ( $mapped <= 0 ) {
+                            continue;
+                        }
+                        $reactor_user = get_userdata( $mapped );
+                        if ( ! $reactor_user instanceof WP_User ) {
                             continue;
                         }
                         if ( ! isset( $comment_meta[ $reaction_key ] ) ) {

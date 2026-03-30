@@ -12,7 +12,7 @@
 
     let $modal, $modalTitle, $progress, $confirmInput, $confirmBtn, $cancelBtn, $summary;
     let $confirmGate, $modalWarning;
-    let $progressBar, $progressText, $stepList, $currentPhase, $cancelImport;
+    let $progressBar, $progressText, $stepList, $currentPhase, $cancelImport, $importSpinner;
     let $errorDetails, $errorScroll;
 
     let cancelled = false;
@@ -22,6 +22,10 @@
     let completedSteps = 0;
     let activeImportChannel = 'api';
     let isSlimConfirmMode = false;
+    /** First records batch of this run sends init_records_import (clears stale deferred queue if settings step was skipped). */
+    let sentRecordsImportInit = false;
+    /** Per-record or connection-pass issues logged while import continues. */
+    let hadNonFatalImportIssues = false;
 
     const CONFIRM_WORD = 'IMPORT';
 
@@ -64,18 +68,18 @@
                 records: null
             } );
         }
-        const order = [ 'peoplegroups', 'contacts', 'groups', 'trainings' ];
+        const order = [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
         const rest = Object.keys( records ).filter( pt => ! order.includes( pt ) );
         const ordered = order.filter( pt => records[ pt ] ).concat( rest );
-        ordered.forEach( pt => {
-            if ( records[ pt ] ) {
-                phasesOut.push( {
-                    type: 'records',
-                    post_type: pt,
-                    label: 'Import ' + pt + ' (' + ( records[ pt ].count || 0 ) + ' records)',
-                    records: records
-                } );
-            }
+        const recordPts = ordered.filter( pt => records[ pt ] );
+        recordPts.forEach( ( pt, idx ) => {
+            phasesOut.push( {
+                type: 'records',
+                post_type: pt,
+                label: 'Import ' + pt + ' (' + ( records[ pt ].count || 0 ) + ' records)',
+                records: records,
+                isLastRecordTypePhase: idx === recordPts.length - 1
+            } );
         } );
         return phasesOut;
     }
@@ -129,6 +133,15 @@
         $progressText.text( n + '%' );
     }
 
+    function setImportSpinner( on ) {
+        if ( ! $importSpinner || ! $importSpinner.length ) {
+            return;
+        }
+        $importSpinner.prop( 'hidden', ! on );
+        $importSpinner.attr( 'aria-hidden', on ? 'false' : 'true' );
+        $progress.attr( 'aria-busy', on ? 'true' : 'false' );
+    }
+
     function addStep( label, status ) {
         const cls = status === 'done' ? 'done' : ( status === 'active' ? 'active' : '' );
         $stepList.append( '<li class="' + cls + '">' + label + '</li>' );
@@ -151,12 +164,24 @@
         $progress.show();
         $errorDetails.hide();
         $errorScroll.text( '' );
+        hadNonFatalImportIssues = false;
         phases.forEach( ( p, i ) => addStep( p.label, i === 0 ? 'active' : '' ) );
+    }
+
+    function appendImportLogLines( lines ) {
+        if ( ! Array.isArray( lines ) || ! lines.length ) {
+            return;
+        }
+        const block = lines.join( '\n' );
+        const cur = $errorScroll.text();
+        $errorScroll.text( cur ? cur + '\n' + block : block );
+        $errorDetails.show();
+        hadNonFatalImportIssues = true;
     }
 
     function showError( message ) {
         $errorScroll.text( message || '' );
-        $errorDetails.toggle( !! message );
+        $errorDetails[ message ? 'show' : 'hide' ]();
     }
 
     function runPhase( phase ) {
@@ -191,21 +216,51 @@
                 let totalImported = 0;
                 const totalExpected = phase.records[ phase.post_type ] ? phase.records[ phase.post_type ].count : 0;
 
+                function finishRecordPhase() {
+                    if ( ! phase.isLastRecordTypePhase ) {
+                        resolve( { imported: totalImported } );
+                        return;
+                    }
+                    $currentPhase.text( 'Applying connection fields…' );
+                    $.post( dtMigrationImport.ajaxUrl, {
+                        action: 'dt_migration_import_batch',
+                        nonce: dtMigrationImport.nonce,
+                        import_channel: activeImportChannel,
+                        step: 'apply_deferred_connections'
+                    } ).done( function( r2 ) {
+                        if ( r2.success ) {
+                            const d2 = r2.data || {};
+                            appendImportLogLines( d2.connection_errors );
+                            resolve( { imported: totalImported } );
+                        } else {
+                            reject( r2.data && r2.data.message ? r2.data.message : 'Connection pass failed' );
+                        }
+                    } ).fail( function( xhr ) {
+                        reject( xhr.statusText || 'Request failed' );
+                    } );
+                }
+
                 function fetchBatch() {
                     if ( cancelled ) {
                         resolve( { cancelled: true } );
                         return;
                     }
-                    $.post( dtMigrationImport.ajaxUrl, {
+                    const payload = {
                         action: 'dt_migration_import_batch',
                         nonce: dtMigrationImport.nonce,
                         import_channel: activeImportChannel,
                         step: 'records',
                         post_type: phase.post_type,
                         offset: offset
-                    } ).done( function( r ) {
+                    };
+                    if ( offset === 0 && ! sentRecordsImportInit ) {
+                        payload.init_records_import = '1';
+                        sentRecordsImportInit = true;
+                    }
+                    $.post( dtMigrationImport.ajaxUrl, payload ).done( function( r ) {
                         if ( r.success ) {
                             const d = r.data;
+                            appendImportLogLines( d.record_errors );
                             totalImported += d.imported || 0;
                             const pct = totalExpected ? ( totalImported / totalExpected ) * 100 : 100;
                             const phasePct = totalSteps ? ( currentPhaseIndex / totalSteps ) * 100 + ( pct / totalSteps ) : 0;
@@ -215,7 +270,7 @@
                                 offset = d.next_offset || ( offset + 50 );
                                 fetchBatch();
                             } else {
-                                resolve( { imported: totalImported } );
+                                finishRecordPhase();
                             }
                         } else {
                             reject( r.data && r.data.message ? r.data.message : 'Records import failed' );
@@ -231,11 +286,17 @@
 
     function startNextPhase() {
         if ( currentPhaseIndex >= phases.length ) {
+            setImportSpinner( false );
             setProgress( 100 );
-            $currentPhase.text( 'Import complete.' );
+            $currentPhase.text(
+                hadNonFatalImportIssues
+                    ? t( 'importCompleteWithLog', 'Import complete. Review logged issues below.' )
+                    : 'Import complete.'
+            );
             $cancelImport.hide();
             return;
         }
+        setImportSpinner( false );
         const phase = phases[ currentPhaseIndex ];
         if ( currentPhaseIndex === 0 ) {
             showFullModal( phase );
@@ -255,9 +316,11 @@
             setProgress( 0 );
             $cancelImport.show();
         }
+        setImportSpinner( true );
         markStepActive( currentPhaseIndex );
         runPhase( phase ).then( function( result ) {
             if ( result && result.cancelled ) {
+                setImportSpinner( false );
                 $currentPhase.text( 'Import cancelled.' );
                 $cancelImport.hide();
                 return;
@@ -267,6 +330,7 @@
             currentPhaseIndex++;
             startNextPhase();
         } ).catch( function( err ) {
+            setImportSpinner( false );
             $currentPhase.text( 'Import failed.' );
             showError( err );
             $cancelImport.hide();
@@ -299,6 +363,7 @@
         $stepList = $( '.dt-migration-step-list' );
         $currentPhase = $( '.dt-migration-current-phase' );
         $cancelImport = $( '.dt-migration-cancel-import' );
+        $importSpinner = $( '.dt-migration-import-spinner' );
         $errorDetails = $( '#dt-migration-error-details' );
         $errorScroll = $( '.dt-migration-error-scroll' );
 
@@ -353,6 +418,7 @@
             totalSteps = phases.length;
             currentPhaseIndex = 0;
             completedSteps = 0;
+            sentRecordsImportInit = false;
             startNextPhase();
         } );
 

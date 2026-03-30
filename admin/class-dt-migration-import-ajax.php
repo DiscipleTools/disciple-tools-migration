@@ -36,7 +36,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             'dt-migration-import',
             $plugin_url . 'admin/js/import.js',
             [ 'jquery' ],
-            '0.2.0',
+            '0.3.2',
             true
         );
         wp_localize_script(
@@ -46,12 +46,13 @@ class Disciple_Tools_Migration_Import_Ajax {
                 'ajaxUrl' => admin_url( 'admin-ajax.php' ),
                 'nonce'   => wp_create_nonce( 'dt_migration_import' ),
                 'strings' => [
-                    'continue'       => __( 'Continue', 'disciple-tools-migration' ),
-                    'confirm'        => __( 'Confirm', 'disciple-tools-migration' ),
-                    'completedLabel' => __( 'Completed:', 'disciple-tools-migration' ),
-                    'nextLabel'      => __( 'Next:', 'disciple-tools-migration' ),
-                    'continueImport' => __( 'Continue import', 'disciple-tools-migration' ),
-                    'confirmImport'  => __( 'Confirm Import', 'disciple-tools-migration' ),
+                    'continue'               => __( 'Continue', 'disciple-tools-migration' ),
+                    'confirm'                => __( 'Confirm', 'disciple-tools-migration' ),
+                    'completedLabel'         => __( 'Completed:', 'disciple-tools-migration' ),
+                    'nextLabel'              => __( 'Next:', 'disciple-tools-migration' ),
+                    'continueImport'         => __( 'Continue import', 'disciple-tools-migration' ),
+                    'confirmImport'          => __( 'Confirm Import', 'disciple-tools-migration' ),
+                    'importCompleteWithLog'  => __( 'Import complete. Review logged issues below.', 'disciple-tools-migration' ),
                 ],
             ]
         );
@@ -77,6 +78,9 @@ class Disciple_Tools_Migration_Import_Ajax {
             .dt-migration-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
             .dt-migration-progress-panel { margin-top: 20px; padding: 20px; background: #f6f7f7; border: 1px solid #c3c4c7; border-radius: 4px; }
             .dt-migration-progress-bar-wrap { display: flex; align-items: center; gap: 12px; }
+            .dt-migration-import-spinner { display: inline-block; width: 22px; height: 22px; flex-shrink: 0; box-sizing: border-box; border: 2px solid rgba(34, 113, 177, 0.2); border-top-color: #2271b1; border-radius: 50%; animation: dt-migration-spin 0.65s linear infinite; vertical-align: middle; }
+            .dt-migration-import-spinner[hidden] { display: none !important; }
+            @keyframes dt-migration-spin { to { transform: rotate(360deg); } }
             .dt-migration-progress-bar { flex: 1; height: 24px; background: #ddd; border-radius: 4px; overflow: hidden; }
             .dt-migration-progress-fill { display: block; height: 100%; background: #2271b1; width: 0%; transition: width 0.2s; }
             .dt-migration-step-list { margin: 16px 0; padding-left: 24px; }
@@ -106,12 +110,22 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'Migration is not enabled.', 'disciple-tools-migration' ) ] );
         }
 
+        $step = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : '';
+
+        if ( $step === 'apply_deferred_connections' ) {
+            $conn_result = Disciple_Tools_Migration_Import_Engine::apply_all_deferred_connections();
+            wp_send_json_success( [
+                'done'                => true,
+                'phase'               => 'connections',
+                'applied'             => $conn_result['applied'] ?? 0,
+                'connection_errors'   => $conn_result['errors'] ?? [],
+            ] );
+        }
+
         $channel = isset( $_POST['import_channel'] ) ? sanitize_key( wp_unslash( $_POST['import_channel'] ) ) : '';
         if ( $channel !== 'file' && $channel !== 'api' ) {
             $channel = 'api';
         }
-
-        $step = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : '';
 
         if ( $channel === 'file' ) {
             $this->handle_file_mode_batch( $step, $settings );
@@ -169,6 +183,8 @@ class Disciple_Tools_Migration_Import_Ajax {
                 ] );
             }
 
+            Disciple_Tools_Migration_Import_Engine::clear_deferred_connection_queue();
+
             wp_send_json_success( [
                 'done'    => true,
                 'phase'   => 'settings',
@@ -180,6 +196,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : '';
             $offset    = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
             $limit     = 50;
+            $init_q    = ! empty( $_POST['init_records_import'] );
 
             if ( empty( $post_type ) ) {
                 wp_send_json_error( [ 'message' => __( 'Post type required.', 'disciple-tools-migration' ) ] );
@@ -208,34 +225,25 @@ class Disciple_Tools_Migration_Import_Ajax {
             $total  = (int) ( $rbody['total'] ?? 0 );
             $has_more = ! empty( $rbody['has_more'] );
 
-            $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $recs, $offset );
+            $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $recs, $offset, $init_q );
 
-            if ( ! empty( $batch_result['errors'] ) ) {
+            if ( ! empty( $batch_result['fatal'] ) ) {
                 wp_send_json_error( [
                     'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
             }
 
-            if ( $post_type === 'groups' && ! $has_more ) {
-                $conn_result = Disciple_Tools_Migration_Import_Engine::apply_deferred_group_connections();
-                if ( ! empty( $conn_result['errors'] ) ) {
-                    wp_send_json_error( [
-                        'message'  => implode( "\n", $conn_result['errors'] ),
-                        'imported' => $batch_result['imported'] ?? 0,
-                    ] );
-                }
-            }
-
             wp_send_json_success( [
-                'done'       => ! $has_more,
-                'phase'      => 'records',
-                'post_type'  => $post_type,
-                'imported'   => $batch_result['imported'],
-                'offset'     => $offset,
-                'total'      => $total,
-                'has_more'   => $has_more,
-                'next_offset' => $offset + count( $recs ),
+                'done'          => ! $has_more,
+                'phase'         => 'records',
+                'post_type'     => $post_type,
+                'imported'      => $batch_result['imported'],
+                'offset'        => $offset,
+                'total'         => $total,
+                'has_more'      => $has_more,
+                'next_offset'   => $offset + count( $recs ),
+                'record_errors' => $batch_result['errors'] ?? [],
             ] );
         }
 
@@ -276,6 +284,8 @@ class Disciple_Tools_Migration_Import_Ajax {
                 ] );
             }
 
+            Disciple_Tools_Migration_Import_Engine::clear_deferred_connection_queue();
+
             wp_send_json_success( [
                 'done'    => true,
                 'phase'   => 'settings',
@@ -287,6 +297,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : '';
             $offset    = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
             $limit     = 50;
+            $init_q    = ! empty( $_POST['init_records_import'] );
 
             if ( empty( $post_type ) ) {
                 wp_send_json_error( [ 'message' => __( 'Post type required.', 'disciple-tools-migration' ) ] );
@@ -302,7 +313,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             $has_more  = ( $offset + count( $slice ) ) < $total;
 
             try {
-                $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $slice, $offset );
+                $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $slice, $offset, $init_q );
             } catch ( Throwable $e ) {
                 wp_send_json_error( [
                     'message' => sprintf(
@@ -314,32 +325,23 @@ class Disciple_Tools_Migration_Import_Ajax {
                 ] );
             }
 
-            if ( ! empty( $batch_result['errors'] ) ) {
+            if ( ! empty( $batch_result['fatal'] ) ) {
                 wp_send_json_error( [
                     'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
             }
 
-            if ( $post_type === 'groups' && ! $has_more ) {
-                $conn_result = Disciple_Tools_Migration_Import_Engine::apply_deferred_group_connections();
-                if ( ! empty( $conn_result['errors'] ) ) {
-                    wp_send_json_error( [
-                        'message'  => implode( "\n", $conn_result['errors'] ),
-                        'imported' => $batch_result['imported'] ?? 0,
-                    ] );
-                }
-            }
-
             wp_send_json_success( [
-                'done'        => ! $has_more,
-                'phase'       => 'records',
-                'post_type'   => $post_type,
-                'imported'    => $batch_result['imported'],
-                'offset'      => $offset,
-                'total'       => $total,
-                'has_more'    => $has_more,
-                'next_offset' => $offset + count( $slice ),
+                'done'            => ! $has_more,
+                'phase'           => 'records',
+                'post_type'       => $post_type,
+                'imported'        => $batch_result['imported'],
+                'offset'          => $offset,
+                'total'           => $total,
+                'has_more'        => $has_more,
+                'next_offset'     => $offset + count( $slice ),
+                'record_errors'   => $batch_result['errors'] ?? [],
             ] );
         }
 

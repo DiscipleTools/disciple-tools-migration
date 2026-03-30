@@ -573,6 +573,7 @@ class Disciple_Tools_Migration_Tab_Import {
         <div id="dt-migration-progress-panel" style="display:none;" class="dt-migration-progress-panel">
             <h3><?php esc_html_e( 'Import Progress', 'disciple-tools-migration' ); ?></h3>
             <div class="dt-migration-progress-bar-wrap">
+                <span class="dt-migration-import-spinner" hidden aria-hidden="true"></span>
                 <div class="dt-migration-progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
                     <span class="dt-migration-progress-fill"></span>
                 </div>
