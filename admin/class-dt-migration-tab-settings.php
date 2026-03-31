@@ -101,7 +101,7 @@ class Disciple_Tools_Migration_Tab_Settings {
                             <?php esc_html_e( 'WordPress users (system)', 'disciple-tools-migration' ); ?>
                         </label>
                         <p class="description">
-                            <?php esc_html_e( 'Select which Disciple.Tools configuration areas are eligible for migration. User export includes safe profile data only (no passwords). Source administrators are never created on the target; they must already exist and be matched by email.', 'disciple-tools-migration' ); ?>
+                            <?php esc_html_e( 'Select which Disciple.Tools configuration areas are eligible for migration. User export includes safe profile data only (no passwords). Matching users are found by email, then login; missing users are created with roles from the export (generated passwords). Importing administrator accounts requires promote_users.', 'disciple-tools-migration' ); ?>
                         </p>
                     </fieldset>
                 </td>
