@@ -257,6 +257,9 @@ class Disciple_Tools_Migration_Import_Ajax {
      * @param array  $settings Migration settings.
      */
     private function handle_file_mode_batch( string $step, array $settings ) : void {
+        // Nonce verified in handle_import_batch() via check_ajax_referer( 'dt_migration_import', 'nonce' ).
+        // phpcs:disable WordPress.Security.NonceVerification.Missing
+
         $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
         $payload       = get_transient( $transient_key );
 
@@ -344,6 +347,8 @@ class Disciple_Tools_Migration_Import_Ajax {
                 'record_errors'   => $batch_result['errors'] ?? [],
             ] );
         }
+
+        // phpcs:enable WordPress.Security.NonceVerification.Missing
 
         wp_send_json_error( [ 'message' => __( 'Invalid step.', 'disciple-tools-migration' ) ] );
     }

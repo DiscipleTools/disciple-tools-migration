@@ -232,15 +232,15 @@ class Disciple_Tools_Migration_Tab_Import {
                                         <td><?php esc_html_e( 'Allowed Record Types', 'disciple-tools-migration' ); ?></td>
                                         <td>
                                             <?php
-                                            $records      = $this->connection_result['allowed_items']['records'] ?? [];
-                                            $recordLabels = [];
+                                            $records       = $this->connection_result['allowed_items']['records'] ?? [];
+                                            $record_labels = [];
                                             if ( ! empty( $records['contacts'] ) ) {
-                                                $recordLabels[] = esc_html__( 'Contacts', 'disciple-tools-migration' );
+                                                $record_labels[] = esc_html__( 'Contacts', 'disciple-tools-migration' );
                                             }
                                             if ( ! empty( $records['groups'] ) ) {
-                                                $recordLabels[] = esc_html__( 'Groups', 'disciple-tools-migration' );
+                                                $record_labels[] = esc_html__( 'Groups', 'disciple-tools-migration' );
                                             }
-                                            echo esc_html( implode( ', ', $recordLabels ) );
+                                            echo esc_html( implode( ', ', $record_labels ) );
                                             ?>
                                         </td>
                                     </tr>
@@ -348,7 +348,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <td><?php echo esc_html( $post_type ); ?></td>
                                             <td><?php echo isset( $summary['tiles'] ) ? intval( $summary['tiles'] ) : 0; ?></td>
                                             <td><?php echo isset( $summary['fields'] ) ? intval( $summary['fields'] ) : 0; ?></td>
-                                            <td><?php echo $record_count; ?></td>
+                                            <td><?php echo esc_html( (string) (int) $record_count ); ?></td>
                                         </tr>
                                         <?php
                                     }
@@ -470,7 +470,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <td><?php echo esc_html( $post_type ); ?></td>
                                             <td><?php echo isset( $summary['tiles'] ) ? intval( $summary['tiles'] ) : 0; ?></td>
                                             <td><?php echo isset( $summary['fields'] ) ? intval( $summary['fields'] ) : 0; ?></td>
-                                            <td><?php echo $record_count; ?></td>
+                                            <td><?php echo esc_html( (string) (int) $record_count ); ?></td>
                                         </tr>
                                     <?php } ?>
                                     </tbody>

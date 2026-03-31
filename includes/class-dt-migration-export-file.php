@@ -104,16 +104,23 @@ class Disciple_Tools_Migration_Export_File {
      */
     private static function get_record_ids( string $post_type, int $limit, int $min_id, int $max_id ) : array {
         global $wpdb;
-        $pt = $wpdb->prepare( '%s', $post_type );
-        $where = $wpdb->prepare( "post_type = %s AND post_status != 'trash'", $post_type );
+        $sql  = "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash'";
+        $args = [ $post_type ];
         if ( $min_id > 0 ) {
-            $where .= $wpdb->prepare( ' AND ID >= %d', $min_id );
+            $sql .= ' AND ID >= %d';
+            $args[] = $min_id;
         }
         if ( $max_id > 0 ) {
-            $where .= $wpdb->prepare( ' AND ID <= %d', $max_id );
+            $sql .= ' AND ID <= %d';
+            $args[] = $max_id;
         }
-        $limit_sql = $limit > 0 ? $wpdb->prepare( ' LIMIT %d', $limit ) : '';
-        $ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE $where ORDER BY ID ASC $limit_sql" );
+        $sql .= ' ORDER BY ID ASC';
+        if ( $limit > 0 ) {
+            $sql .= ' LIMIT %d';
+            $args[] = $limit;
+        }
+        $prepared = call_user_func_array( [ $wpdb, 'prepare' ], array_merge( [ $sql ], $args ) );
+        $ids      = $wpdb->get_col( $prepared );
         return array_map( 'intval', (array) $ids );
     }
 

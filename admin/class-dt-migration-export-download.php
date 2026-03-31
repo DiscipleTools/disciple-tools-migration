@@ -39,18 +39,10 @@ class Disciple_Tools_Migration_Export_Download {
         }
 
         $record_options = [];
-        $export_by  = isset( $_POST['dt_migration_export_by'] ) && is_array( $_POST['dt_migration_export_by'] )
-            ? wp_unslash( $_POST['dt_migration_export_by'] )
-            : [];
-        $limits  = isset( $_POST['dt_migration_export_limit'] ) && is_array( $_POST['dt_migration_export_limit'] )
-            ? wp_unslash( $_POST['dt_migration_export_limit'] )
-            : [];
-        $min_ids = isset( $_POST['dt_migration_export_min_id'] ) && is_array( $_POST['dt_migration_export_min_id'] )
-            ? wp_unslash( $_POST['dt_migration_export_min_id'] )
-            : [];
-        $max_ids = isset( $_POST['dt_migration_export_max_id'] ) && is_array( $_POST['dt_migration_export_max_id'] )
-            ? wp_unslash( $_POST['dt_migration_export_max_id'] )
-            : [];
+        $export_by = $this->sanitize_post_type_assoc_array( 'dt_migration_export_by', 'sanitize_key' );
+        $limits    = $this->sanitize_post_type_assoc_array( 'dt_migration_export_limit', 'absint' );
+        $min_ids   = $this->sanitize_post_type_assoc_array( 'dt_migration_export_min_id', 'absint' );
+        $max_ids   = $this->sanitize_post_type_assoc_array( 'dt_migration_export_max_id', 'absint' );
 
         $allowed_records = $settings['allowed_items']['records'] ?? [];
         foreach ( $allowed_records as $post_type => $enabled ) {
@@ -94,5 +86,31 @@ class Disciple_Tools_Migration_Export_Download {
 
         echo wp_json_encode( $payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
         exit;
+    }
+
+    /**
+     * Reads a POST array keyed by post type with sanitized values.
+     *
+     * @param string $post_key        Key in $_POST.
+     * @param string $value_sanitizer 'sanitize_key' or 'absint'.
+     * @return array<string, int|string>
+     */
+    private function sanitize_post_type_assoc_array( string $post_key, string $value_sanitizer ) : array {
+        // Nonce verified in handle_download(); values sanitized per key below.
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+        $source = ( isset( $_POST[ $post_key ] ) && is_array( $_POST[ $post_key ] ) ) ? wp_unslash( $_POST[ $post_key ] ) : [];
+        $out    = [];
+        foreach ( $source as $raw_key => $raw_val ) {
+            $key = sanitize_key( (string) $raw_key );
+            if ( $key === '' ) {
+                continue;
+            }
+            if ( 'absint' === $value_sanitizer ) {
+                $out[ $key ] = absint( $raw_val );
+            } else {
+                $out[ $key ] = sanitize_key( (string) $raw_val );
+            }
+        }
+        return $out;
     }
 }

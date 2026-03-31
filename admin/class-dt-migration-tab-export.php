@@ -125,7 +125,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                                 <td><?php echo esc_html( $post_type ); ?></td>
                                                 <td><?php echo isset( $summary['tiles'] ) ? (int) $summary['tiles'] : 0; ?></td>
                                                 <td><?php echo isset( $summary['fields'] ) ? (int) $summary['fields'] : 0; ?></td>
-                                                <td><?php echo $count; ?></td>
+                                                <td><?php echo esc_html( (string) $count ); ?></td>
                                             </tr>
                                         <?php endforeach; ?>
                                         </tbody>
@@ -200,7 +200,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                     </button>
                                 </p>
                             </form>
-                            <?php if ( $show_export_record_filters ) : ?>
+                                <?php if ( $show_export_record_filters ) : ?>
                             <script>
                             ( function( $ ) {
                                 'use strict';
@@ -234,7 +234,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                 } );
                             } )( jQuery );
                             </script>
-                            <?php endif; ?>
+                                <?php endif; ?>
                             <?php else : ?>
                                 <p>
                                     <?php esc_html_e( 'No record types are enabled for export. Enable at least one record type on the Settings tab.', 'disciple-tools-migration' ); ?>
