@@ -97,7 +97,7 @@ class Disciple_Tools_Migration_Export_Download {
      */
     private function sanitize_post_type_assoc_array( string $post_key, string $value_sanitizer ) : array {
         // Nonce verified in handle_download(); values sanitized per key below.
-        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.NonceVerification.Missing
         $source = ( isset( $_POST[ $post_key ] ) && is_array( $_POST[ $post_key ] ) ) ? wp_unslash( $_POST[ $post_key ] ) : [];
         $out    = [];
         foreach ( $source as $raw_key => $raw_val ) {

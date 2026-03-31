@@ -119,8 +119,7 @@ class Disciple_Tools_Migration_Export_File {
             $sql .= ' LIMIT %d';
             $args[] = $limit;
         }
-        $prepared = call_user_func_array( [ $wpdb, 'prepare' ], array_merge( [ $sql ], $args ) );
-        $ids      = $wpdb->get_col( $prepared );
+        $ids = $wpdb->get_col( call_user_func_array( [ $wpdb, 'prepare' ], array_merge( [ $sql ], $args ) ) );
         return array_map( 'intval', (array) $ids );
     }
 
