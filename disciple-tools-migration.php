@@ -103,6 +103,7 @@ class Disciple_Tools_Migration_Plugin {
         if ( is_admin() || $is_rest ) {
             require_once 'includes/class-dt-migration-system-users.php';
             require_once 'includes/class-dt-migration-import-engine.php';
+            require_once 'includes/class-dt-migration-preflight.php';
         }
 
         if ( is_admin() ) {

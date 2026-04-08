@@ -104,7 +104,7 @@ class Disciple_Tools_Migration_Tab_Import {
                         </p>
                     <?php else : ?>
                         <p>
-                            <?php esc_html_e( 'Use the API block below to pull from a live source site (Server A), or use the file block to upload a JSON export. The preview and Start Import button apply to whichever flow you used last (fetch or upload).', 'disciple-tools-migration' ); ?>
+                            <?php esc_html_e( 'Use the API block below to pull from a live source site (Server A), or use the file block to upload a JSON export. The preview and import buttons apply to whichever flow you used last (fetch or upload). Run preflight (optional) checks for common issues before you start; Start Import runs immediately without that step.', 'disciple-tools-migration' ); ?>
                         </p>
                         <p>
                             <?php esc_html_e( 'Imports delete existing records for the selected types before recreating them with preserved IDs from the source, so that internal connections remain valid.', 'disciple-tools-migration' ); ?>
@@ -357,7 +357,10 @@ class Disciple_Tools_Migration_Tab_Import {
                                 </table>
 
                                 <p style="margin-top: 16px;">
-                                    <button type="button" class="button button-primary dt-migration-start-import" data-import-channel="api">
+                                    <button type="button" class="button dt-migration-run-preflight" data-import-channel="api">
+                                        <?php esc_html_e( 'Run preflight', 'disciple-tools-migration' ); ?>
+                                    </button>
+                                    <button type="button" class="button button-primary dt-migration-start-import" data-import-channel="api" style="margin-left:8px;">
                                         <?php esc_html_e( 'Start Import', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
@@ -476,7 +479,10 @@ class Disciple_Tools_Migration_Tab_Import {
                                     </tbody>
                                 </table>
                                 <p style="margin-top: 16px;">
-                                    <button type="button" class="button button-primary dt-migration-start-import" data-import-channel="file">
+                                    <button type="button" class="button dt-migration-run-preflight" data-import-channel="file">
+                                        <?php esc_html_e( 'Run preflight', 'disciple-tools-migration' ); ?>
+                                    </button>
+                                    <button type="button" class="button button-primary dt-migration-start-import" data-import-channel="file" style="margin-left:8px;">
                                         <?php esc_html_e( 'Start Import', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
@@ -537,6 +543,42 @@ class Disciple_Tools_Migration_Tab_Import {
             return;
         }
         ?>
+        <div id="dt-migration-preflight-modal" class="dt-migration-modal dt-migration-preflight-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="dt-migration-preflight-title">
+            <div class="dt-migration-modal-overlay dt-migration-preflight-overlay"></div>
+            <div class="dt-migration-modal-content dt-migration-modal-content--wide">
+                <h2 id="dt-migration-preflight-title"><?php esc_html_e( 'Preflight results', 'disciple-tools-migration' ); ?></h2>
+                <div class="dt-migration-modal-body">
+                    <p class="dt-migration-preflight-intro"><?php esc_html_e( 'These checks are advisory. You can proceed; the import may still log per-record issues.', 'disciple-tools-migration' ); ?></p>
+                    <div class="dt-migration-preflight-info-wrap" hidden>
+                        <p class="dt-migration-preflight-field-label">
+                            <strong><?php esc_html_e( 'Notes', 'disciple-tools-migration' ); ?></strong>
+                        </p>
+                        <label class="screen-reader-text" for="dt-migration-preflight-info-text"><?php esc_html_e( 'Preflight notes', 'disciple-tools-migration' ); ?></label>
+                        <textarea id="dt-migration-preflight-info-text"
+                                  class="dt-migration-preflight-textarea dt-migration-preflight-textarea--notes"
+                                  readonly
+                                  rows="4"
+                                  cols="40"></textarea>
+                    </div>
+                    <div class="dt-migration-preflight-warnings-wrap" hidden>
+                        <p class="dt-migration-preflight-field-label">
+                            <strong><?php esc_html_e( 'Warnings', 'disciple-tools-migration' ); ?></strong>
+                        </p>
+                        <label class="screen-reader-text" for="dt-migration-preflight-warnings-text"><?php esc_html_e( 'Preflight warnings', 'disciple-tools-migration' ); ?></label>
+                        <textarea id="dt-migration-preflight-warnings-text"
+                                  class="dt-migration-preflight-textarea dt-migration-preflight-textarea--warnings"
+                                  readonly
+                                  rows="10"
+                                  cols="40"></textarea>
+                    </div>
+                    <p class="dt-migration-preflight-status" hidden></p>
+                    <div class="dt-migration-modal-actions" style="margin-top:16px;">
+                        <button type="button" class="button dt-migration-preflight-close"><?php esc_html_e( 'Close', 'disciple-tools-migration' ); ?></button>
+                        <button type="button" class="button button-primary dt-migration-preflight-proceed"><?php esc_html_e( 'Proceed with import', 'disciple-tools-migration' ); ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div id="dt-migration-import-modal" class="dt-migration-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="dt-migration-modal-title">
             <div class="dt-migration-modal-overlay"></div>
             <div class="dt-migration-modal-content">

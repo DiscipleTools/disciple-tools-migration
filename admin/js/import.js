@@ -14,6 +14,8 @@
     let $confirmGate, $modalWarning;
     let $progressBar, $progressText, $stepList, $currentPhase, $cancelImport, $importSpinner;
     let $errorDetails, $errorScroll;
+    let $pfModal, $pfInfoWrap, $pfInfoText, $pfWarningsWrap, $pfWarningsText, $pfStatus, $pfProceed, $pfClose, $pfOverlay;
+    let pendingPreflightSection = null;
 
     let cancelled = false;
     let phases = [];
@@ -35,6 +37,19 @@
         return div.innerHTML;
     }
 
+    /**
+     * One logical row per array item. Preserves leading spaces (e.g. indented field lines).
+     * Replaces embedded newlines only so each server line stays a single textarea row.
+     */
+    function preflightLinesToTextareaValue( lines ) {
+        if ( ! Array.isArray( lines ) || ! lines.length ) {
+            return '';
+        }
+        return lines.map( function( line ) {
+            return String( line == null ? '' : line ).replace( /\r?\n/g, ' ' );
+        } ).join( '\n' );
+    }
+
     function getSelectedSettings( $scope ) {
         const root = $scope && $scope.length ? $scope : $( document );
         const out = [];
@@ -53,6 +68,94 @@
             out[ pt ] = { count };
         } );
         return out;
+    }
+
+    function beginImportFlow( $section ) {
+        const fromBtn = $section.find( '.dt-migration-start-import' ).first().data( 'importChannel' );
+        activeImportChannel = fromBtn === 'file' ? 'file' : 'api';
+
+        const settings = getSelectedSettings( $section );
+        const records = getSelectedRecords( $section );
+        if ( ! settings.length && ! Object.keys( records ).length ) {
+            window.alert( 'Please select at least one setting type or record type to import.' );
+            return;
+        }
+        phases = buildPhases( $section );
+        if ( ! phases.length ) {
+            return;
+        }
+        totalSteps = phases.length;
+        currentPhaseIndex = 0;
+        completedSteps = 0;
+        sentRecordsImportInit = false;
+        startNextPhase();
+    }
+
+    function runPreflightRequest( $section ) {
+        const fromBtn = $section.find( '.dt-migration-run-preflight' ).first().data( 'importChannel' );
+        const channel = fromBtn === 'file' ? 'file' : 'api';
+        const settings = getSelectedSettings( $section );
+        const records = getSelectedRecords( $section );
+        const recordPts = Object.keys( records );
+
+        if ( ! settings.length && ! recordPts.length ) {
+            window.alert( 'Please select at least one setting type or record type.' );
+            return;
+        }
+
+        if ( ! $pfModal.length ) {
+            window.alert( t( 'preflightFailed', 'Preflight is not available on this screen.' ) );
+            return;
+        }
+
+        $pfStatus.text( t( 'preflightRunning', 'Running preflight…' ) ).prop( 'hidden', false );
+        $pfInfoText.val( '' );
+        $pfWarningsText.val( '' );
+        $pfInfoWrap.prop( 'hidden', true );
+        $pfWarningsWrap.prop( 'hidden', true );
+        $pfModal.show();
+
+        const payload = {
+            action: 'dt_migration_preflight',
+            nonce: dtMigrationImport.nonce,
+            import_channel: channel,
+            settings_selected: settings,
+            records_selected: recordPts
+        };
+
+        $.post( dtMigrationImport.ajaxUrl, payload ).done( function( r ) {
+            $pfStatus.prop( 'hidden', true );
+            if ( ! r.success || ! r.data ) {
+                const msg = r.data && r.data.message ? r.data.message : t( 'preflightFailed', 'Preflight request failed.' );
+                window.alert( msg );
+                $pfModal.hide();
+                return;
+            }
+            const data = r.data;
+            const warnings = data.warnings || [];
+            const info = data.info || [];
+
+            if ( info.length ) {
+                $pfInfoText.val( preflightLinesToTextareaValue( info ) );
+                $pfInfoWrap.prop( 'hidden', false );
+            } else {
+                $pfInfoText.val( '' );
+                $pfInfoWrap.prop( 'hidden', true );
+            }
+
+            if ( warnings.length ) {
+                $pfWarningsText.val( preflightLinesToTextareaValue( warnings ) );
+            } else {
+                $pfWarningsText.val( t( 'preflightNoIssues', 'No preflight warnings for the current selection and sample data.' ) );
+            }
+            $pfWarningsWrap.prop( 'hidden', false );
+
+            pendingPreflightSection = $section;
+        } ).fail( function() {
+            $pfStatus.prop( 'hidden', true );
+            window.alert( t( 'preflightFailed', 'Preflight request failed.' ) );
+            $pfModal.hide();
+        } );
     }
 
     function buildPhases( $section ) {
@@ -366,6 +469,15 @@
         $importSpinner = $( '.dt-migration-import-spinner' );
         $errorDetails = $( '#dt-migration-error-details' );
         $errorScroll = $( '.dt-migration-error-scroll' );
+        $pfModal = $( '#dt-migration-preflight-modal' );
+        $pfInfoWrap = $( '.dt-migration-preflight-info-wrap' );
+        $pfInfoText = $( '#dt-migration-preflight-info-text' );
+        $pfWarningsWrap = $( '.dt-migration-preflight-warnings-wrap' );
+        $pfWarningsText = $( '#dt-migration-preflight-warnings-text' );
+        $pfStatus = $( '.dt-migration-preflight-status' );
+        $pfProceed = $( '.dt-migration-preflight-proceed' );
+        $pfClose = $( '.dt-migration-preflight-close' );
+        $pfOverlay = $pfModal.find( '.dt-migration-preflight-overlay' );
 
         if ( ! $modal.length || ! $( '.dt-migration-start-import' ).length ) {
             return;
@@ -400,26 +512,31 @@
             $( this ).prop( 'disabled', true ).text( 'Cancelling...' );
         } );
 
+        $( '.dt-migration-run-preflight' ).on( 'click', function() {
+            const $section = $( this ).closest( '.dt-migration-import-section' );
+            runPreflightRequest( $section );
+        } );
+
+        $pfClose.on( 'click', function() {
+            pendingPreflightSection = null;
+            $pfModal.hide();
+        } );
+        $pfOverlay.on( 'click', function() {
+            pendingPreflightSection = null;
+            $pfModal.hide();
+        } );
+        $pfProceed.on( 'click', function() {
+            const $section = pendingPreflightSection;
+            pendingPreflightSection = null;
+            $pfModal.hide();
+            if ( $section && $section.length ) {
+                beginImportFlow( $section );
+            }
+        } );
+
         $( '.dt-migration-start-import' ).on( 'click', function() {
             const $section = $( this ).closest( '.dt-migration-import-section' );
-            const fromBtn = $( this ).data( 'importChannel' );
-            activeImportChannel = fromBtn === 'file' ? 'file' : 'api';
-
-            const settings = getSelectedSettings( $section );
-            const records = getSelectedRecords( $section );
-            if ( ! settings.length && ! Object.keys( records ).length ) {
-                alert( 'Please select at least one setting type or record type to import.' );
-                return;
-            }
-            phases = buildPhases( $section );
-            if ( ! phases.length ) {
-                return;
-            }
-            totalSteps = phases.length;
-            currentPhaseIndex = 0;
-            completedSteps = 0;
-            sentRecordsImportInit = false;
-            startNextPhase();
+            beginImportFlow( $section );
         } );
 
         $( document ).on( 'change', '.dt-migration-select-all-settings', function() {
