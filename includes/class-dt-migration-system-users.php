@@ -308,6 +308,8 @@ class Disciple_Tools_Migration_System_Users {
     /**
      * Replaces the user's roles with the given list (same rules as new-user creation).
      *
+     * Avoids set_role( '' ) so the target user is never left roleless mid-import.
+     *
      * @param int   $user_id WordPress user ID.
      * @param array $roles   Sanitized role slugs (may be empty).
      * @return string|null Error message, or null on success.
@@ -318,8 +320,18 @@ class Disciple_Tools_Migration_System_Users {
             return __( 'You do not have permission to assign the administrator role.', 'disciple-tools-migration' );
         }
 
+        $wp_roles = wp_roles();
+        foreach ( $roles as $slug ) {
+            if ( ! $wp_roles->is_role( $slug ) ) {
+                return sprintf(
+                    /* translators: %s: role slug from export */
+                    __( 'Unknown or invalid role in export: %s', 'disciple-tools-migration' ),
+                    $slug
+                );
+            }
+        }
+
         $user = new WP_User( $user_id );
-        $user->set_role( '' );
         if ( ! empty( $roles ) ) {
             $primary = array_shift( $roles );
             $user->set_role( $primary );
@@ -327,7 +339,11 @@ class Disciple_Tools_Migration_System_Users {
                 $user->add_role( $extra_role );
             }
         } else {
-            $user->set_role( get_option( 'default_role', 'subscriber' ) );
+            $default_role = sanitize_key( (string) get_option( 'default_role', 'subscriber' ) );
+            if ( ! $wp_roles->is_role( $default_role ) ) {
+                $default_role = 'subscriber';
+            }
+            $user->set_role( $default_role );
         }
 
         return null;
