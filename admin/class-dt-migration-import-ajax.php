@@ -15,6 +15,7 @@ class Disciple_Tools_Migration_Import_Ajax {
      */
     public function __construct() {
         add_action( 'wp_ajax_dt_migration_import_batch', [ $this, 'handle_import_batch' ] );
+        add_action( 'wp_ajax_dt_migration_preflight', [ $this, 'handle_preflight' ] );
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
     }
 
@@ -36,7 +37,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             'dt-migration-import',
             $plugin_url . 'admin/js/import.js',
             [ 'jquery' ],
-            '0.3.2',
+            '0.3.5',
             true
         );
         wp_localize_script(
@@ -53,6 +54,14 @@ class Disciple_Tools_Migration_Import_Ajax {
                     'continueImport'         => __( 'Continue import', 'disciple-tools-migration' ),
                     'confirmImport'          => __( 'Confirm Import', 'disciple-tools-migration' ),
                     'importCompleteWithLog'  => __( 'Import complete. Review logged issues below.', 'disciple-tools-migration' ),
+                    'preflightTitle'         => __( 'Preflight results', 'disciple-tools-migration' ),
+                    'preflightIntro'         => __( 'These checks are advisory. You can proceed; the import may still log per-record issues.', 'disciple-tools-migration' ),
+                    'preflightNoIssues'      => __( 'No preflight warnings for the current selection and sample data.', 'disciple-tools-migration' ),
+                    'preflightProceed'       => __( 'Proceed with import', 'disciple-tools-migration' ),
+                    'preflightClose'         => __( 'Close', 'disciple-tools-migration' ),
+                    'preflightRunning'       => __( 'Running preflight…', 'disciple-tools-migration' ),
+                    'preflightFailed'        => __( 'Preflight request failed.', 'disciple-tools-migration' ),
+                    'runPreflight'           => __( 'Run preflight', 'disciple-tools-migration' ),
                 ],
             ]
         );
@@ -69,6 +78,13 @@ class Disciple_Tools_Migration_Import_Ajax {
             .dt-migration-modal { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; }
             .dt-migration-modal-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
             .dt-migration-modal-content { position: relative; background: #fff; padding: 24px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.2); border-radius: 4px; }
+            .dt-migration-modal-content--wide { max-width: 640px; }
+            .dt-migration-preflight-field-label { margin: 12px 0 6px; color: #1d2327; font-size: 13px; }
+            .dt-migration-preflight-field-label:first-of-type { margin-top: 0; }
+            .dt-migration-preflight-textarea { display: block; width: 100%; max-width: 100%; box-sizing: border-box; margin: 0 0 4px; padding: 8px 10px; font-size: 13px; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #1d2327; background: #fff; border: 1px solid #8c8f94; border-radius: 4px; resize: vertical; }
+            .dt-migration-preflight-textarea--notes { min-height: 72px; height: 100px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+            .dt-migration-preflight-textarea--warnings { min-height: 160px; height: 260px; max-height: 420px; overflow: auto; white-space: pre; overflow-wrap: normal; word-break: normal; }
+            .dt-migration-preflight-status { font-style: italic; color: #50575e; }
             .dt-migration-modal-body { margin-top: 16px; }
             .dt-migration-modal-warning { color: #b32d2e; font-weight: 600; }
             .dt-migration-modal-summary { margin: 12px 0; padding: 12px; background: #f0f0f1; border-radius: 4px; font-size: 13px; }
@@ -257,6 +273,9 @@ class Disciple_Tools_Migration_Import_Ajax {
      * @param array  $settings Migration settings.
      */
     private function handle_file_mode_batch( string $step, array $settings ) : void {
+        // Nonce verified in handle_import_batch() via check_ajax_referer( 'dt_migration_import', 'nonce' ).
+        // phpcs:disable WordPress.Security.NonceVerification.Missing
+
         $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
         $payload       = get_transient( $transient_key );
 
@@ -345,6 +364,204 @@ class Disciple_Tools_Migration_Import_Ajax {
             ] );
         }
 
+        // phpcs:enable WordPress.Security.NonceVerification.Missing
+
         wp_send_json_error( [ 'message' => __( 'Invalid step.', 'disciple-tools-migration' ) ] );
+    }
+
+    /**
+     * AJAX: non-destructive preflight warnings for the current import selection.
+     */
+    public function handle_preflight() : void {
+        check_ajax_referer( 'dt_migration_import', 'nonce' );
+
+        if ( ! current_user_can( 'manage_dt' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
+        }
+
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
+        if ( empty( $settings['enabled'] ) ) {
+            wp_send_json_error( [ 'message' => __( 'Migration is not enabled.', 'disciple-tools-migration' ) ] );
+        }
+
+        $channel = isset( $_POST['import_channel'] ) ? sanitize_key( wp_unslash( $_POST['import_channel'] ) ) : '';
+        if ( $channel !== 'file' && $channel !== 'api' ) {
+            $channel = 'api';
+        }
+
+        $selected_settings = isset( $_POST['settings_selected'] ) && is_array( $_POST['settings_selected'] )
+            ? array_map( 'sanitize_key', wp_unslash( $_POST['settings_selected'] ) )
+            : [];
+        $settings_map        = array_fill_keys( $selected_settings, true );
+        $records_selected_in = isset( $_POST['records_selected'] ) && is_array( $_POST['records_selected'] )
+            ? array_map( 'sanitize_key', wp_unslash( $_POST['records_selected'] ) )
+            : [];
+
+        if ( empty( $selected_settings ) && empty( $records_selected_in ) ) {
+            wp_send_json_error( [ 'message' => __( 'Select at least one setting or record type for preflight.', 'disciple-tools-migration' ) ] );
+        }
+
+        if ( $channel === 'file' ) {
+            $result = $this->preflight_file_payload( $settings_map, $records_selected_in );
+        } else {
+            $result = $this->preflight_api_payload( $settings, $settings_map, $records_selected_in );
+        }
+
+        if ( isset( $result['error'] ) ) {
+            wp_send_json_error( [ 'message' => $result['error'] ] );
+        }
+
+        wp_send_json_success( $result );
+    }
+
+    /**
+     * Preflight using uploaded JSON transient.
+     *
+     * @param array<string, bool> $settings_map       Selected settings.
+     * @param string[]           $records_selected_in Post types.
+     * @return array|array{ error: string }
+     */
+    private function preflight_file_payload( array $settings_map, array $records_selected_in ) : array {
+        $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
+        $payload       = get_transient( $transient_key );
+
+        $export_block = ( is_array( $payload ) && isset( $payload['export'] ) && is_array( $payload['export'] ) ) ? $payload['export'] : [];
+        $has_dt       = ! empty( $export_block['dt_settings'] );
+        $has_users    = array_key_exists( 'system_users', $export_block ) && is_array( $export_block['system_users'] );
+        if ( ! is_array( $payload ) || ( ! $has_dt && ! $has_users ) ) {
+            return [ 'error' => __( 'No migration file loaded or payload expired. Please upload the file again.', 'disciple-tools-migration' ) ];
+        }
+
+        $records_all = isset( $payload['records'] ) && is_array( $payload['records'] ) ? $payload['records'] : [];
+        $records     = [];
+        foreach ( $records_selected_in as $pt ) {
+            if ( isset( $records_all[ $pt ] ) && is_array( $records_all[ $pt ] ) ) {
+                $records[ $pt ] = $records_all[ $pt ];
+            }
+        }
+
+        $analysis = Disciple_Tools_Migration_Preflight::analyze(
+            [
+                'export'            => $export_block,
+                'records'           => $records,
+                'records_sampled'   => false,
+                'settings_selected' => $settings_map,
+                'records_selected'  => $records_selected_in,
+            ]
+        );
+
+        return [
+            'warnings' => $analysis['warnings'],
+            'info'     => $analysis['info'],
+        ];
+    }
+
+    /**
+     * Preflight using Server A export + sampled record batches.
+     *
+     * @param array               $settings           Plugin settings.
+     * @param array<string, bool> $settings_map       Selected settings.
+     * @param string[]           $records_selected_in Post types.
+     * @return array|array{ error: string }
+     */
+    private function preflight_api_payload( array $settings, array $settings_map, array $records_selected_in ) : array {
+        $remote_url = $settings['api']['remote_base_url'] ?? '';
+        $jwt        = $settings['api']['jwt_token'] ?? '';
+        $token_at   = (int) ( $settings['api']['jwt_token_set_at'] ?? 0 );
+
+        if ( empty( $remote_url ) || empty( $jwt ) ) {
+            return [ 'error' => __( 'Not connected to Server A. Run Test Connection first.', 'disciple-tools-migration' ) ];
+        }
+
+        if ( $token_at < ( time() - HOUR_IN_SECONDS ) ) {
+            return [ 'error' => __( 'JWT token expired. Please re-run Test Connection.', 'disciple-tools-migration' ) ];
+        }
+
+        $base = rtrim( $remote_url, '/' );
+
+        $export_res = wp_remote_post(
+            $base . '/wp-json/dt-migration/v1/export',
+            [
+                'timeout' => 60,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $jwt,
+                    'Content-Type'  => 'application/json',
+                ],
+                'body'    => wp_json_encode( [ 'settings_only' => true ] ),
+            ]
+        );
+
+        if ( is_wp_error( $export_res ) ) {
+            return [ 'error' => $export_res->get_error_message() ];
+        }
+
+        $code = wp_remote_retrieve_response_code( $export_res );
+        $body = json_decode( (string) wp_remote_retrieve_body( $export_res ), true );
+        if ( $code < 200 || $code >= 300 || ! is_array( $body ) ) {
+            return [ 'error' => __( 'Failed to fetch export from Server A.', 'disciple-tools-migration' ) ];
+        }
+
+        $export_block = isset( $body['export'] ) && is_array( $body['export'] ) ? $body['export'] : [];
+
+        $records        = [];
+        $records_sample = false;
+        $fetch_notes    = [];
+        foreach ( $records_selected_in as $pt ) {
+            $records_res = wp_remote_get(
+                add_query_arg(
+                    [ 'offset' => 0, 'limit' => 100 ],
+                    $base . '/wp-json/dt-migration/v1/records/' . rawurlencode( $pt )
+                ),
+                [
+                    'timeout' => 60,
+                    'headers' => [ 'Authorization' => 'Bearer ' . $jwt ],
+                ]
+            );
+            if ( is_wp_error( $records_res ) ) {
+                $fetch_notes[] = sprintf(
+                    /* translators: %s: post type slug */
+                    __( 'Could not fetch sample records for "%s" from Server A.', 'disciple-tools-migration' ),
+                    $pt
+                );
+                continue;
+            }
+            $rc = wp_remote_retrieve_response_code( $records_res );
+            $rb = json_decode( (string) wp_remote_retrieve_body( $records_res ), true );
+            if ( $rc < 200 || $rc >= 300 || ! is_array( $rb ) ) {
+                $fetch_notes[] = sprintf(
+                    /* translators: %s: post type slug */
+                    __( 'Server A returned an error when fetching sample records for "%s".', 'disciple-tools-migration' ),
+                    $pt
+                );
+                continue;
+            }
+            $rec = isset( $rb['records'] ) && is_array( $rb['records'] ) ? $rb['records'] : [];
+            if ( ! empty( $rec ) ) {
+                $records[ $pt ] = $rec;
+            }
+            if ( ! empty( $rb['has_more'] ) ) {
+                $records_sample = true;
+            }
+        }
+
+        $analysis = Disciple_Tools_Migration_Preflight::analyze(
+            [
+                'export'            => $export_block,
+                'records'           => $records,
+                'records_sampled'   => $records_sample,
+                'settings_selected' => $settings_map,
+                'records_selected'  => $records_selected_in,
+            ]
+        );
+
+        $info_out = $analysis['info'];
+        if ( ! empty( $fetch_notes ) ) {
+            $info_out = array_merge( $info_out, $fetch_notes );
+        }
+
+        return [
+            'warnings' => $analysis['warnings'],
+            'info'     => $info_out,
+        ];
     }
 }

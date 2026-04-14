@@ -7,8 +7,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  * System user export/import for migrations (Phase 1).
  *
  * Exports safe user fields (no passwords). On import, maps source user IDs to target IDs.
- * Administrator users from the source are never created; they must already exist on the
- * target (matched by email, then login) and must be administrators there.
+ * Administrators are migrated like other users: matched by email or login when present, or
+ * created with roles from the export. Assigning administrator requires promote_users (and
+ * create_users for new accounts).
  */
 class Disciple_Tools_Migration_System_Users {
 
@@ -113,7 +114,7 @@ class Disciple_Tools_Migration_System_Users {
      * Imports users from export payload and stores old_id => new_id map.
      *
      * @param array $system_users Block from export.system_users.
-     * @return array{ error?: string, map: array<string, int>, created: int, mapped_existing: int, admin_mapped: int }
+     * @return array{ error?: string, map: array<string, int>, created: int, mapped_existing: int, admin_mapped: int, admin_created: int }
      */
     public static function apply_import( array $system_users ) : array {
         $out = [
@@ -121,6 +122,7 @@ class Disciple_Tools_Migration_System_Users {
             'created'         => 0,
             'mapped_existing' => 0,
             'admin_mapped'    => 0,
+            'admin_created'   => 0,
         ];
 
         $rows = $system_users['users'] ?? [];
@@ -151,37 +153,21 @@ class Disciple_Tools_Migration_System_Users {
 
             $email = isset( $row['user_email'] ) ? sanitize_email( (string) $row['user_email'] ) : '';
             $login = isset( $row['user_login'] ) ? sanitize_user( (string) $row['user_login'], true ) : '';
-
-            if ( self::is_migration_admin_user( $row ) ) {
-                $existing = self::find_existing_user( $email, $login );
-                if ( ! $existing instanceof WP_User ) {
-                    return array_merge( $out, [
-                        'error' => sprintf(
-                            /* translators: 1: old user ID, 2: email or login */
-                            __( 'Administrator user from source (old ID %1$d, %2$s) must already exist on this site. Create the account first or fix email/login match.', 'disciple-tools-migration' ),
-                            $old_id,
-                            $email !== '' ? $email : $login
-                        ),
-                    ] );
-                }
-                if ( ! in_array( 'administrator', (array) $existing->roles, true ) ) {
-                    return array_merge( $out, [
-                        'error' => sprintf(
-                            /* translators: 1: existing user ID */
-                            __( 'Matched user ID %1$d for a source administrator must be an administrator on this site.', 'disciple-tools-migration' ),
-                            (int) $existing->ID
-                        ),
-                    ] );
-                }
-                $out['map'][ (string) $old_id ] = (int) $existing->ID;
-                ++$out['admin_mapped'];
-                continue;
-            }
+            $is_src_admin = self::is_migration_admin_user( $row );
 
             $existing = self::find_existing_user( $email, $login );
             if ( $existing instanceof WP_User ) {
                 $out['map'][ (string) $old_id ] = (int) $existing->ID;
                 ++$out['mapped_existing'];
+
+                if ( $is_src_admin ) {
+                    $roles_err = self::assign_roles_to_wp_user( $existing->ID, self::normalized_roles_from_row( $row ) );
+                    if ( $roles_err !== null ) {
+                        return array_merge( $out, [ 'error' => $roles_err ] );
+                    }
+                    ++$out['admin_mapped'];
+                }
+
                 self::maybe_update_user_profile( $existing->ID, $row );
                 continue;
             }
@@ -190,7 +176,18 @@ class Disciple_Tools_Migration_System_Users {
                 return array_merge( $out, [
                     'error' => sprintf(
                         /* translators: 1: old user ID */
-                        __( 'Cannot create missing non-admin user (source ID %1$d): create_users capability required.', 'disciple-tools-migration' ),
+                        __( 'Cannot create missing user (source ID %1$d): create_users capability required.', 'disciple-tools-migration' ),
+                        $old_id
+                    ),
+                ] );
+            }
+
+            $norm_roles = self::normalized_roles_from_row( $row );
+            if ( in_array( 'administrator', $norm_roles, true ) && ! current_user_can( 'promote_users' ) ) {
+                return array_merge( $out, [
+                    'error' => sprintf(
+                        /* translators: 1: old user ID */
+                        __( 'Cannot create administrator account for source ID %1$d: promote_users capability required.', 'disciple-tools-migration' ),
                         $old_id
                     ),
                 ] );
@@ -209,6 +206,9 @@ class Disciple_Tools_Migration_System_Users {
             }
             $out['map'][ (string) $old_id ] = (int) $new_id;
             ++$out['created'];
+            if ( $is_src_admin ) {
+                ++$out['admin_created'];
+            }
         }
 
         $option_value = [
@@ -291,6 +291,49 @@ class Disciple_Tools_Migration_System_Users {
     }
 
     /**
+     * Role slugs from the export row, with administrator ensured when the row is a source admin.
+     *
+     * @param array $row Export user row.
+     * @return string[]
+     */
+    private static function normalized_roles_from_row( array $row ) : array {
+        $roles = isset( $row['roles'] ) && is_array( $row['roles'] ) ? $row['roles'] : [];
+        $roles = array_values( array_filter( array_map( 'sanitize_key', $roles ) ) );
+        if ( self::is_migration_admin_user( $row ) && ! in_array( 'administrator', $roles, true ) ) {
+            $roles[] = 'administrator';
+        }
+        return $roles;
+    }
+
+    /**
+     * Replaces the user's roles with the given list (same rules as new-user creation).
+     *
+     * @param int   $user_id WordPress user ID.
+     * @param array $roles   Sanitized role slugs (may be empty).
+     * @return string|null Error message, or null on success.
+     */
+    private static function assign_roles_to_wp_user( int $user_id, array $roles ) : ?string {
+        $roles = array_values( array_filter( array_map( 'sanitize_key', $roles ) ) );
+        if ( in_array( 'administrator', $roles, true ) && ! current_user_can( 'promote_users' ) ) {
+            return __( 'You do not have permission to assign the administrator role.', 'disciple-tools-migration' );
+        }
+
+        $user = new WP_User( $user_id );
+        $user->set_role( '' );
+        if ( ! empty( $roles ) ) {
+            $primary = array_shift( $roles );
+            $user->set_role( $primary );
+            foreach ( $roles as $extra_role ) {
+                $user->add_role( $extra_role );
+            }
+        } else {
+            $user->set_role( get_option( 'default_role', 'subscriber' ) );
+        }
+
+        return null;
+    }
+
+    /**
      * @param array $row
      * @return int|WP_Error
      */
@@ -304,6 +347,14 @@ class Disciple_Tools_Migration_System_Users {
 
         if ( username_exists( $login ) || email_exists( $email ) ) {
             return new WP_Error( 'exists', __( 'User login or email already exists.', 'disciple-tools-migration' ) );
+        }
+
+        $norm_roles = self::normalized_roles_from_row( $row );
+        if ( in_array( 'administrator', $norm_roles, true ) && ! current_user_can( 'promote_users' ) ) {
+            return new WP_Error(
+                'no_promote',
+                __( 'You do not have permission to assign the administrator role when creating users.', 'disciple-tools-migration' )
+            );
         }
 
         $password = wp_generate_password( 24, true, true );
@@ -322,18 +373,9 @@ class Disciple_Tools_Migration_System_Users {
             return $user_id;
         }
 
-        $roles = isset( $row['roles'] ) && is_array( $row['roles'] ) ? $row['roles'] : [];
-        $roles = array_values( array_filter( array_map( 'sanitize_key', $roles ) ) );
-        $user  = new WP_User( $user_id );
-        $user->set_role( '' );
-        if ( ! empty( $roles ) ) {
-            $primary = array_shift( $roles );
-            $user->set_role( $primary );
-            foreach ( $roles as $extra_role ) {
-                $user->add_role( $extra_role );
-            }
-        } else {
-            $user->set_role( get_option( 'default_role', 'subscriber' ) );
+        $role_err = self::assign_roles_to_wp_user( (int) $user_id, $norm_roles );
+        if ( $role_err !== null ) {
+            return new WP_Error( 'role_assign_failed', $role_err );
         }
 
         if ( ! empty( $row['meta'] ) && is_array( $row['meta'] ) ) {

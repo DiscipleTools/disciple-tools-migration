@@ -104,16 +104,79 @@ class Disciple_Tools_Migration_Export_File {
      */
     private static function get_record_ids( string $post_type, int $limit, int $min_id, int $max_id ) : array {
         global $wpdb;
-        $pt = $wpdb->prepare( '%s', $post_type );
-        $where = $wpdb->prepare( "post_type = %s AND post_status != 'trash'", $post_type );
-        if ( $min_id > 0 ) {
-            $where .= $wpdb->prepare( ' AND ID >= %d', $min_id );
+
+        if ( $limit > 0 ) {
+            if ( $min_id > 0 && $max_id > 0 ) {
+                $ids = $wpdb->get_col(
+                    $wpdb->prepare(
+                        "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d AND ID <= %d ORDER BY ID ASC LIMIT %d",
+                        $post_type,
+                        $min_id,
+                        $max_id,
+                        $limit
+                    )
+                );
+            } elseif ( $min_id > 0 ) {
+                $ids = $wpdb->get_col(
+                    $wpdb->prepare(
+                        "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d ORDER BY ID ASC LIMIT %d",
+                        $post_type,
+                        $min_id,
+                        $limit
+                    )
+                );
+            } elseif ( $max_id > 0 ) {
+                $ids = $wpdb->get_col(
+                    $wpdb->prepare(
+                        "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID <= %d ORDER BY ID ASC LIMIT %d",
+                        $post_type,
+                        $max_id,
+                        $limit
+                    )
+                );
+            } else {
+                $ids = $wpdb->get_col(
+                    $wpdb->prepare(
+                        "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' ORDER BY ID ASC LIMIT %d",
+                        $post_type,
+                        $limit
+                    )
+                );
+            }
+        } elseif ( $min_id > 0 && $max_id > 0 ) {
+            $ids = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d AND ID <= %d ORDER BY ID ASC",
+                    $post_type,
+                    $min_id,
+                    $max_id
+                )
+            );
+        } elseif ( $min_id > 0 ) {
+            $ids = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d ORDER BY ID ASC",
+                    $post_type,
+                    $min_id
+                )
+            );
+        } elseif ( $max_id > 0 ) {
+            $ids = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID <= %d ORDER BY ID ASC",
+                    $post_type,
+                    $max_id
+                )
+            );
+        } else {
+            $ids = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' ORDER BY ID ASC",
+                    $post_type
+                )
+            );
         }
-        if ( $max_id > 0 ) {
-            $where .= $wpdb->prepare( ' AND ID <= %d', $max_id );
-        }
-        $limit_sql = $limit > 0 ? $wpdb->prepare( ' LIMIT %d', $limit ) : '';
-        $ids = $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE $where ORDER BY ID ASC $limit_sql" );
+
         return array_map( 'intval', (array) $ids );
     }
 

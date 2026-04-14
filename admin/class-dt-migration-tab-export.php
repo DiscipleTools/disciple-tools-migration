@@ -125,7 +125,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                                 <td><?php echo esc_html( $post_type ); ?></td>
                                                 <td><?php echo isset( $summary['tiles'] ) ? (int) $summary['tiles'] : 0; ?></td>
                                                 <td><?php echo isset( $summary['fields'] ) ? (int) $summary['fields'] : 0; ?></td>
-                                                <td><?php echo $count; ?></td>
+                                                <td><?php echo esc_html( (string) $count ); ?></td>
                                             </tr>
                                         <?php endforeach; ?>
                                         </tbody>
@@ -143,15 +143,18 @@ class Disciple_Tools_Migration_Tab_Export {
                         <hr style="margin: 28px 0;">
                         <h3 style="margin-top: 0;"><?php esc_html_e( 'Download export (JSON)', 'disciple-tools-migration' ); ?></h3>
                         <p>
-                            <?php esc_html_e( 'The file includes the settings and record types enabled on the Settings tab. By default all records of each type are included; use By Range or By limited records for advanced partial exports.', 'disciple-tools-migration' ); ?>
+                            <?php esc_html_e( 'Download a JSON file containing everything enabled on the Settings tab (configuration and all records for each enabled post type).', 'disciple-tools-migration' ); ?>
                         </p>
                             <?php
                             $record_stats = Disciple_Tools_Migration_Export_File::get_record_stats();
+                            /** When true (e.g. add_filter( 'dt_migration_show_export_record_filters', '__return_true' ) ), per-post-type range and limit controls are shown. */
+                            $show_export_record_filters = apply_filters( 'dt_migration_show_export_record_filters', false );
                             if ( ! empty( $record_stats ) ) :
                                 ?>
                             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                                 <input type="hidden" name="action" value="dt_migration_download_export">
                                 <?php wp_nonce_field( 'dt_migration_download_export', 'dt_migration_download_export_nonce' ); ?>
+                                <?php if ( $show_export_record_filters ) : ?>
                                 <table class="widefat striped dt-migration-export-table" style="margin-top: 16px;">
                                     <thead>
                                     <tr>
@@ -190,12 +193,14 @@ class Disciple_Tools_Migration_Tab_Export {
                                     <?php endforeach; ?>
                                     </tbody>
                                 </table>
+                                <?php endif; ?>
                                 <p style="margin-top: 16px;">
                                     <button type="submit" class="button button-primary">
                                         <?php esc_html_e( 'Download Export (JSON)', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
                             </form>
+                                <?php if ( $show_export_record_filters ) : ?>
                             <script>
                             ( function( $ ) {
                                 'use strict';
@@ -229,6 +234,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                 } );
                             } )( jQuery );
                             </script>
+                                <?php endif; ?>
                             <?php else : ?>
                                 <p>
                                     <?php esc_html_e( 'No record types are enabled for export. Enable at least one record type on the Settings tab.', 'disciple-tools-migration' ); ?>

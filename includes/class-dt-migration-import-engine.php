@@ -742,9 +742,16 @@ class Disciple_Tools_Migration_Import_Engine {
             $in_degree[ $id ] = count( array_unique( $deps ) );
         }
 
-        $ready  = array_keys( array_filter( $in_degree, function ( $d ) { return $d === 0; } ) );
-        $out    = [];
-        $done   = [];
+        $ready = array_keys(
+            array_filter(
+                $in_degree,
+                function ( $d ) {
+                    return $d === 0;
+                }
+            )
+        );
+        $out  = [];
+        $done = [];
         while ( ! empty( $ready ) ) {
             $nid = array_shift( $ready );
             if ( isset( $done[ $nid ] ) ) {
