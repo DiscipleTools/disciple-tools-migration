@@ -297,12 +297,14 @@ class Disciple_Tools_Migration_Preflight {
             if ( empty( $slice ) ) {
                 continue;
             }
-            $placeholders = implode( ',', array_fill( 0, count( $slice ), '%d' ) );
-            $sql            = $wpdb->prepare(
-                'SELECT ID, post_type FROM ' . $wpdb->posts . ' WHERE ID IN (' . $placeholders . ')',
-                ...$slice
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPlaceholder -- IN clause: one %d per bound intval in $slice; no interpolation of user input.
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT ID, post_type FROM ' . $wpdb->posts . ' WHERE ID IN (' . implode( ',', array_fill( 0, count( $slice ), '%d' ) ) . ')',
+                    ...$slice
+                ),
+                ARRAY_A
             );
-            $rows = $wpdb->get_results( $sql, ARRAY_A );
             if ( ! is_array( $rows ) ) {
                 continue;
             }
