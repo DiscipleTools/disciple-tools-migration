@@ -234,7 +234,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <?php
                                             $records       = $this->connection_result['allowed_items']['records'] ?? [];
                                             $record_labels = [];
-                                                     if ( is_array( $records ) ) {
+                                            if ( is_array( $records ) ) {
                                                 foreach ( $records as $post_type => $enabled ) {
                                                     if ( ! empty( $enabled ) ) {
                                                         $record_labels[] = Disciple_Tools_Migration_Menu::get_post_type_label( (string) $post_type );
