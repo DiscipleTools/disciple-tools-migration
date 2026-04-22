@@ -32,6 +32,13 @@ class Disciple_Tools_Migration_Preflight {
     ];
 
     /**
+     * Batch size for ID IN (...) queries in post ID collision preflight (avoids huge single queries).
+     *
+     * @var int
+     */
+    private const POST_ID_COLLISION_QUERY_CHUNK = 500;
+
+    /**
      * Runs preflight analysis and returns warning lines (translatable strings already resolved).
      *
      * @param array $args {
@@ -262,6 +269,57 @@ class Disciple_Tools_Migration_Preflight {
     }
 
     /**
+     * Load post_type from wp_posts for the given IDs (chunked queries).
+     *
+     * @param int[] $post_ids Positive integers (typically unique).
+     * @return array<int, string> Post ID => post_type for rows that exist.
+     */
+    private static function lookup_post_types_by_id( array $post_ids ) : array {
+        global $wpdb;
+
+        $post_ids = array_values(
+            array_filter(
+                array_map( 'intval', $post_ids ),
+                static function ( $id ) {
+                    return $id > 0;
+                }
+            )
+        );
+        if ( empty( $post_ids ) ) {
+            return [];
+        }
+
+        $out   = [];
+        $chunk = self::POST_ID_COLLISION_QUERY_CHUNK;
+        $total = count( $post_ids );
+        for ( $offset = 0; $offset < $total; $offset += $chunk ) {
+            $slice = array_slice( $post_ids, $offset, $chunk );
+            if ( empty( $slice ) ) {
+                continue;
+            }
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPlaceholder -- IN clause: one %d per bound intval in $slice; no interpolation of user input.
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    'SELECT ID, post_type FROM ' . $wpdb->posts . ' WHERE ID IN (' . implode( ',', array_fill( 0, count( $slice ), '%d' ) ) . ')',
+                    ...$slice
+                ),
+                ARRAY_A
+            );
+            if ( ! is_array( $rows ) ) {
+                continue;
+            }
+            foreach ( $rows as $row ) {
+                if ( ! isset( $row['ID'], $row['post_type'] ) ) {
+                    continue;
+                }
+                $out[ (int) $row['ID'] ] = (string) $row['post_type'];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @param string $post_type Post type.
      * @param array  $records   Records to scan.
      * @return string[]
@@ -271,7 +329,8 @@ class Disciple_Tools_Migration_Preflight {
             return [];
         }
 
-        $collisions = [];
+        $seen          = [];
+        $candidate_ids = [];
         foreach ( $records as $record ) {
             if ( ! is_array( $record ) || empty( $record['ID'] ) ) {
                 continue;
@@ -280,11 +339,25 @@ class Disciple_Tools_Migration_Preflight {
             if ( $pid <= 0 ) {
                 continue;
             }
-            $existing = get_post( $pid );
-            if ( ! $existing instanceof WP_Post ) {
+            if ( isset( $seen[ $pid ] ) ) {
                 continue;
             }
-            if ( get_post_type( $pid ) === $post_type ) {
+            $seen[ $pid ] = true;
+            $candidate_ids[] = $pid;
+        }
+
+        if ( empty( $candidate_ids ) ) {
+            return [];
+        }
+
+        $type_by_id = self::lookup_post_types_by_id( $candidate_ids );
+
+        $collisions = [];
+        foreach ( $candidate_ids as $pid ) {
+            if ( ! isset( $type_by_id[ $pid ] ) ) {
+                continue;
+            }
+            if ( $type_by_id[ $pid ] === $post_type ) {
                 continue;
             }
             $collisions[] = $pid;
