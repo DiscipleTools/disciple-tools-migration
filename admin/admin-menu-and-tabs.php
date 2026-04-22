@@ -8,7 +8,7 @@ require_once __DIR__ . '/class-dt-migration-tab-import.php';
 /**
  * Class Disciple_Tools_Migration_Menu
  *
- * Top-level admin menu for the Migration plugin with Settings, Export and Import tabs.
+ * Admin menu for the Migration plugin under Extensions (D.T). Export and Import are available as in-page tabs.
  */
 class Disciple_Tools_Migration_Menu {
 
@@ -55,7 +55,9 @@ class Disciple_Tools_Migration_Menu {
      * @since 0.1.0
      */
     public function __construct() {
-        add_action( 'admin_menu', [ $this, 'register_menu' ] );
+        // Run late so the dt_extensions parent menu from the theme is always registered first.
+        add_action( 'admin_menu', [ $this, 'register_menu' ], 99 );
+        add_action( 'admin_init', [ $this, 'maybe_redirect_legacy_migration_pages' ], 1 );
         $this->page_title = __( 'Migration', 'disciple-tools-migration' );
     } // End __construct()
 
@@ -115,53 +117,43 @@ class Disciple_Tools_Migration_Menu {
     }
 
     /**
-     * Registers the top-level Migration admin menu.
+     * Registers Migration under the shared Extensions (D.T) menu.
      *
      * @since 0.1.0
      */
     public function register_menu() {
         $this->page_title = __( 'Migration', 'disciple-tools-migration' );
 
-        $parent_slug = $this->token;
+        $parent_slug = 'dt_extensions';
 
-        // Top-level menu.
-        add_menu_page(
+        add_submenu_page(
+            $parent_slug,
             $this->page_title,
             $this->page_title,
             'manage_dt',
-            $parent_slug,
-            [ $this, 'content' ],
-            'dashicons-migrate',
-            57
-        );
-
-        // Submenu entries so the left-hand menu shows a fly-out similar to Site Links.
-        add_submenu_page(
-            $parent_slug,
-            __( 'Settings', 'disciple-tools-migration' ),
-            __( 'Settings', 'disciple-tools-migration' ),
-            'manage_dt',
-            $parent_slug,
+            $this->token,
             [ $this, 'content' ]
         );
+    }
 
-        add_submenu_page(
-            $parent_slug,
-            __( 'Export', 'disciple-tools-migration' ),
-            __( 'Export', 'disciple-tools-migration' ),
-            'manage_dt',
-            $parent_slug . '_export',
-            [ $this, 'content' ]
-        );
-
-        add_submenu_page(
-            $parent_slug,
-            __( 'Import', 'disciple-tools-migration' ),
-            __( 'Import', 'disciple-tools-migration' ),
-            'manage_dt',
-            $parent_slug . '_import',
-            [ $this, 'content' ]
-        );
+    /**
+     * Redirect old submenu URLs (export/import page slugs) to the main Migration screen with the matching tab.
+     *
+     * @return void
+     */
+    public function maybe_redirect_legacy_migration_pages() {
+        if ( ! current_user_can( 'manage_dt' ) ) {
+            return;
+        }
+        $page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
+        if ( $page === $this->token . '_export' ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=' . $this->token . '&tab=export' ) );
+            exit;
+        }
+        if ( $page === $this->token . '_import' ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=' . $this->token . '&tab=import' ) );
+            exit;
+        }
     }
 
     /**
@@ -174,22 +166,7 @@ class Disciple_Tools_Migration_Menu {
             wp_die( esc_html__( 'You do not have sufficient permissions to access this page.', 'disciple-tools-migration' ) );
         }
 
-        $tab  = 'settings';
-        $page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : $this->token;
-
-        // Allow explicit tab override via query parameter for flexibility.
-        if ( isset( $_GET['tab'] ) ) {
-            $tab = sanitize_key( wp_unslash( $_GET['tab'] ) );
-        } else {
-            // Map submenu page slugs back to logical tabs.
-            if ( $page === $this->token . '_export' ) {
-                $tab = 'export';
-            } elseif ( $page === $this->token . '_import' ) {
-                $tab = 'import';
-            } else {
-                $tab = 'settings';
-            }
-        }
+        $tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'settings';
 
         $link = 'admin.php?page=' . $this->token . '&tab=';
 
