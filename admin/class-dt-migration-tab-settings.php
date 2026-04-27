@@ -127,6 +127,33 @@ class Disciple_Tools_Migration_Tab_Settings {
                     </fieldset>
                 </td>
             </tr>
+            <tr>
+                <th colspan="2" scope="colgroup">
+                    <?php esc_html_e( 'File import jobs', 'disciple-tools-migration' ); ?>
+                </th>
+            </tr>
+            <tr>
+                <td>
+                    <label for="dt_migration_file_job_max_age_days">
+                        <?php esc_html_e( 'Remove file migration jobs after (days)', 'disciple-tools-migration' ); ?>
+                    </label>
+                </td>
+                <td>
+                    <input
+                        type="number"
+                        id="dt_migration_file_job_max_age_days"
+                        name="dt_migration_file_job_max_age_days"
+                        class="small-text"
+                        min="1"
+                        max="365"
+                        step="1"
+                        value="<?php echo esc_attr( (string) ( (int) ( $settings['file']['job_max_age_days'] ?? 7 ) ) ); ?>"
+                    />
+                    <p class="description">
+                        <?php esc_html_e( 'Completed uploads and their metadata on the Import tab are removed automatically when older than this many days. The default is 7. Lower this if you need to free database space sooner.', 'disciple-tools-migration' ); ?>
+                    </p>
+                </td>
+            </tr>
                 <tr>
                     <td>
                         <button class="button button-primary">
@@ -180,7 +207,25 @@ class Disciple_Tools_Migration_Tab_Settings {
         $settings['allowed_items']['records']['contacts'] = ! empty( $allowed['records']['contacts'] );
         $settings['allowed_items']['records']['groups']   = ! empty( $allowed['records']['groups'] );
 
+        $days = isset( $post_vars['dt_migration_file_job_max_age_days'] ) ? (int) $post_vars['dt_migration_file_job_max_age_days'] : 7;
+        if ( $days < 1 ) {
+            $days = 1;
+        }
+        if ( $days > 365 ) {
+            $days = 365;
+        }
+        if ( ! isset( $settings['file'] ) || ! is_array( $settings['file'] ) ) {
+            $settings['file'] = [
+                'compression' => 'zip',
+            ];
+        }
+        $settings['file']['job_max_age_days'] = $days;
+
         Disciple_Tools_Migration_Menu::update_settings( $settings );
+
+        if ( class_exists( 'Disciple_Tools_Migration_File_Job_Store' ) ) {
+            Disciple_Tools_Migration_File_Job_Store::prune_expired_jobs();
+        }
     }
 
     /**

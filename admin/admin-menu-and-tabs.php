@@ -93,7 +93,8 @@ class Disciple_Tools_Migration_Menu {
                 'jwt_token_set_at' => 0,
             ],
             'file'          => [
-                'compression' => 'zip',
+                'compression'      => 'zip',
+                'job_max_age_days' => defined( 'DT_MIGRATION_FILE_JOB_MAX_AGE_DAYS' ) ? (int) constant( 'DT_MIGRATION_FILE_JOB_MAX_AGE_DAYS' ) : 7,
             ],
         ];
 

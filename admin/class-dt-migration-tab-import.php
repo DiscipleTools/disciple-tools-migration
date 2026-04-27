@@ -56,12 +56,22 @@ class Disciple_Tools_Migration_Tab_Import {
      */
     private $import_preview_channel = null;
 
+    /**
+     * Active file-mode job id (JSON stored in options) for the current preview, if any.
+     *
+     * @var string
+     */
+    private $active_file_job_id = '';
+
     public function content() {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
 
         // Process any submitted connection test form before rendering.
         $this->process_form_fields( $settings );
         $settings = Disciple_Tools_Migration_Menu::get_settings();
+        if ( ! empty( $settings['enabled'] ) ) {
+            $this->try_load_file_job_from_query( $settings );
+        }
 
         ?>
         <div class="wrap">
@@ -367,11 +377,12 @@ class Disciple_Tools_Migration_Tab_Import {
                             <?php endif; ?>
                         </div>
                         <hr style="margin: 28px 0;">
-                        <div class="dt-migration-import-section" data-import-channel="file">
+                        <div class="dt-migration-import-section" data-import-channel="file" data-file-job-id="<?php echo esc_attr( $this->active_file_job_id ); ?>">
                             <h3><?php esc_html_e( 'Upload & preview (JSON file)', 'disciple-tools-migration' ); ?></h3>
                             <p>
                                 <?php esc_html_e( 'Upload a migration export JSON file from another Disciple.Tools site, then preview and import.', 'disciple-tools-migration' ); ?>
                             </p>
+                            <?php $this->render_past_file_jobs_table( $settings ); ?>
                             <?php if ( ! empty( $this->connection_error ) ) : ?>
                                 <div class="notice notice-error" style="margin-top:10px;">
                                     <p><?php echo esc_html( $this->connection_error ); ?></p>
@@ -488,7 +499,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                 </p>
                             <?php endif; ?>
                         </div>
-                        <?php if ( ! empty( $this->settings_preview ) ) : ?>
+                        <?php if ( ! empty( $this->settings_preview ) && ( $this->import_preview_channel === 'api' || $this->import_preview_channel === 'file' ) ) : ?>
                             <?php $this->render_import_modal_and_progress(); ?>
                         <?php endif; ?>
                     <?php endif; ?>
@@ -918,9 +929,57 @@ class Disciple_Tools_Migration_Tab_Import {
             return;
         }
 
-        $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
-        set_transient( $transient_key, $payload, 15 * MINUTE_IN_SECONDS );
+        if ( ! class_exists( 'Disciple_Tools_Migration_File_Job_Store' ) ) {
+            $this->connection_error = esc_html__( 'Migration file jobs are not available. Please reload the page.', 'disciple-tools-migration' );
+            return;
+        }
 
+        $filename  = isset( $_FILES['dt_migration_import_file']['name'] ) ? (string) $_FILES['dt_migration_import_file']['name'] : 'export.json';
+        $job_id    = Disciple_Tools_Migration_File_Job_Store::create_job( get_current_user_id(), $payload, $filename );
+        if ( $job_id === '' ) {
+            $this->connection_error = esc_html__( 'Could not store the migration file for import. The server may be out of space or the export may be too large for your database settings.', 'disciple-tools-migration' );
+            return;
+        }
+        $this->active_file_job_id = $job_id;
+        $this->build_file_preview_state_from_payload( $payload );
+        if ( class_exists( 'Disciple_Tools_Migration_File_Job_Store' ) ) {
+            Disciple_Tools_Migration_File_Job_Store::prune_expired_jobs();
+        }
+    }
+
+    /**
+     * Fills preview state from a GET ?file_job= request (retry a past job).
+     *
+     * @param array $settings
+     * @return void
+     */
+    private function try_load_file_job_from_query( array $settings ) : void {
+        if ( ! class_exists( 'Disciple_Tools_Migration_File_Job_Store' ) || $this->settings_preview !== null ) {
+            return;
+        }
+        if ( ! isset( $_GET['file_job'] ) ) {
+            return;
+        }
+        $raw = sanitize_text_field( wp_unslash( $_GET['file_job'] ) );
+        $id  = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
+        if ( $id === '' ) {
+            return;
+        }
+        $user_id  = get_current_user_id();
+        $payload  = Disciple_Tools_Migration_File_Job_Store::get_payload( $user_id, $id );
+        if ( $payload === null || ! Disciple_Tools_Migration_File_Job_Store::is_valid_migration_payload( $payload ) ) {
+            $this->connection_error = esc_html__( 'That migration file job was not found, completed without a retriable copy, or you do not have access. Upload the JSON again.', 'disciple-tools-migration' );
+            return;
+        }
+        $this->active_file_job_id = $id;
+        $this->build_file_preview_state_from_payload( $payload );
+    }
+
+    /**
+     * @param array $payload Full export payload.
+     * @return void
+     */
+    private function build_file_preview_state_from_payload( array $payload ) : void {
         $dt_settings   = $payload['export']['dt_settings'] ?? [];
         $post_types    = $dt_settings['dt_post_types_settings']['values'] ?? [];
         $tiles_all     = $dt_settings['dt_tiles_settings']['values'] ?? [];
@@ -945,5 +1004,112 @@ class Disciple_Tools_Migration_Tab_Import {
         }
 
         $this->import_preview_channel = 'file';
+    }
+
+    /**
+     * Renders a table of past file import jobs for the current user.
+     *
+     * @param array $settings
+     * @return void
+     */
+    private function render_past_file_jobs_table( array $settings ) : void {
+        if ( ! class_exists( 'Disciple_Tools_Migration_File_Job_Store' ) || empty( $settings['enabled'] ) ) {
+            return;
+        }
+        $user_id  = get_current_user_id();
+        $rows     = Disciple_Tools_Migration_File_Job_Store::list_jobs_for_user( $user_id );
+        $page_token = Disciple_Tools_Migration_Menu::instance()->token;
+        $url_base   = add_query_arg(
+            [
+                'page' => $page_token,
+                'tab'  => 'import',
+            ],
+            admin_url( 'admin.php' )
+        );
+        ?>
+        <h4 class="dt-migration-past-jobs-heading"><?php esc_html_e( 'Recent file migration jobs', 'disciple-tools-migration' ); ?></h4>
+        <p class="description">
+            <?php esc_html_e( 'Each upload is kept until you delete it, it succeeds (payload cleared), or it is older than the day limit on the Settings tab. Use Retry to load a failed or interrupted job. Completed jobs that no longer have a stored file cannot be retried.', 'disciple-tools-migration' ); ?>
+        </p>
+        <table class="widefat striped dt-migration-past-jobs" style="margin: 12px 0 20px;">
+            <thead>
+            <tr>
+                <th scope="col"><?php esc_html_e( 'Date', 'disciple-tools-migration' ); ?></th>
+                <th scope="col"><?php esc_html_e( 'File', 'disciple-tools-migration' ); ?></th>
+                <th scope="col"><?php esc_html_e( 'Status', 'disciple-tools-migration' ); ?></th>
+                <th scope="col"><?php esc_html_e( 'Size', 'disciple-tools-migration' ); ?></th>
+                <th scope="col"><?php esc_html_e( 'Actions', 'disciple-tools-migration' ); ?></th>
+            </tr>
+            </thead>
+            <tbody>
+            <?php if ( ! $rows ) : ?>
+                <tr>
+                    <td colspan="5"><?php esc_html_e( 'No file migration jobs yet. Upload a JSON file above to create one.', 'disciple-tools-migration' ); ?></td>
+                </tr>
+            <?php else : ?>
+                <?php
+                foreach ( $rows as $row ) {
+                    $job_id   = isset( $row['job_id'] ) ? (string) $row['job_id'] : '';
+                    $status   = isset( $row['status'] ) ? (string) $row['status'] : 'ready';
+                    $label    = isset( $row['label'] ) ? (string) $row['label'] : '';
+                    $ts       = isset( $row['stored_at'] ) ? (int) $row['stored_at'] : 0;
+                    $bytes    = isset( $row['byte_size'] ) ? (int) $row['byte_size'] : 0;
+                    $date_str = $ts > 0 ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $ts ) : '—';
+                    $size_str = $bytes > 0
+                        /* translators: %s: file size e.g. 2 MB */
+                        ? size_format( $bytes, 1 )
+                        : '—';
+                    $has_payload = $job_id !== '' && Disciple_Tools_Migration_File_Job_Store::job_has_stored_payload( $job_id );
+                    $can_retry   = $has_payload && in_array( $status, [ Disciple_Tools_Migration_File_Job_Store::STATUS_READY, Disciple_Tools_Migration_File_Job_Store::STATUS_FAILED, Disciple_Tools_Migration_File_Job_Store::STATUS_CANCELLED, Disciple_Tools_Migration_File_Job_Store::STATUS_RUNNING ], true );
+                    $retry_url   = add_query_arg( 'file_job', $job_id, $url_base );
+                    $pill_class  = 'dt-migration-job-pill dt-migration-job-pill--neutral';
+                    if ( $status === Disciple_Tools_Migration_File_Job_Store::STATUS_SUCCESS ) {
+                        $pill_class = 'dt-migration-job-pill dt-migration-job-pill--success';
+                    } elseif ( in_array( $status, [ Disciple_Tools_Migration_File_Job_Store::STATUS_FAILED, Disciple_Tools_Migration_File_Job_Store::STATUS_CANCELLED ], true ) ) {
+                        $pill_class = 'dt-migration-job-pill dt-migration-job-pill--failed';
+                    }
+                    $status_label = $status;
+                    switch ( $status ) {
+                        case Disciple_Tools_Migration_File_Job_Store::STATUS_SUCCESS:
+                            $status_label = __( 'Success', 'disciple-tools-migration' );
+                            break;
+                        case Disciple_Tools_Migration_File_Job_Store::STATUS_FAILED:
+                            $status_label = __( 'Failed', 'disciple-tools-migration' );
+                            break;
+                        case Disciple_Tools_Migration_File_Job_Store::STATUS_CANCELLED:
+                            $status_label = __( 'Cancelled', 'disciple-tools-migration' );
+                            break;
+                        case Disciple_Tools_Migration_File_Job_Store::STATUS_RUNNING:
+                            $status_label = __( 'In progress', 'disciple-tools-migration' );
+                            break;
+                        case Disciple_Tools_Migration_File_Job_Store::STATUS_READY:
+                        default:
+                            $status_label = __( 'Ready', 'disciple-tools-migration' );
+                            break;
+                    }
+                    ?>
+                    <tr>
+                        <td><?php echo esc_html( $date_str ); ?></td>
+                        <td><?php echo esc_html( $label !== '' ? $label : '—' ); ?></td>
+                        <td>
+                            <span class="<?php echo esc_attr( $pill_class ); ?>"><?php echo esc_html( $status_label ); ?></span>
+                        </td>
+                        <td><?php echo esc_html( $size_str ); ?></td>
+                        <td>
+                            <?php if ( $can_retry ) : ?>
+                                <a class="button button-small" href="<?php echo esc_url( $retry_url ); ?>"><?php esc_html_e( 'Retry', 'disciple-tools-migration' ); ?></a>
+                            <?php else : ?>
+                                <span class="description" aria-label="<?php esc_attr_e( 'No retry for this job', 'disciple-tools-migration' ); ?>">—</span>
+                            <?php endif; ?>
+                            <button type="button" class="button button-small button-link-delete dt-migration-file-job-delete" data-job-id="<?php echo esc_attr( $job_id ); ?>" style="margin-left:6px;">
+                                <?php esc_html_e( 'Delete', 'disciple-tools-migration' ); ?>
+                            </button>
+                        </td>
+                    </tr>
+                <?php } ?>
+            <?php endif; ?>
+            </tbody>
+        </table>
+        <?php
     }
 }

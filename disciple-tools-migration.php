@@ -22,6 +22,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Default max age (days) for stored file migration jobs when option is unset.
+ * Overridden by Settings > File import jobs.
+ */
+if ( ! defined( 'DT_MIGRATION_FILE_JOB_MAX_AGE_DAYS' ) ) {
+    define( 'DT_MIGRATION_FILE_JOB_MAX_AGE_DAYS', 7 );
+}
+
+/**
  * Gets the instance of the Disciple_Tools_Migration_Plugin class.
  *
  * @since 1.0.0
@@ -105,6 +113,7 @@ class Disciple_Tools_Migration_Plugin {
             require_once 'includes/class-dt-migration-import-engine.php';
             require_once 'includes/class-dt-migration-preflight.php';
         }
+        require_once 'includes/class-dt-migration-file-job-store.php';
 
         if ( is_admin() ) {
             require_once 'includes/class-dt-migration-export-file.php';
@@ -116,6 +125,9 @@ class Disciple_Tools_Migration_Plugin {
             require_once 'admin/class-dt-migration-import-ajax.php';
             new Disciple_Tools_Migration_Import_Ajax();
         }
+
+        add_action( 'init', [ $this, 'maybe_schedule_file_job_prune' ] );
+        add_action( 'dt_migration_prune_file_jobs', [ $this, 'run_file_job_prune' ] );
 
         $this->i18n();
 
@@ -151,6 +163,32 @@ class Disciple_Tools_Migration_Plugin {
      */
     public static function deactivation() {
         delete_option( 'dismissed-disciple-tools-migration' );
+        $ts = wp_next_scheduled( 'dt_migration_prune_file_jobs' );
+        if ( $ts ) {
+            wp_unschedule_event( $ts, 'dt_migration_prune_file_jobs' );
+        }
+    }
+
+    /**
+     * Schedules daily prune of expired file migration jobs.
+     *
+     * @return void
+     */
+    public function maybe_schedule_file_job_prune() {
+        if ( ! wp_next_scheduled( 'dt_migration_prune_file_jobs' ) ) {
+            wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'dt_migration_prune_file_jobs' );
+        }
+    }
+
+    /**
+     * Cron: removes file job records older than configured retention.
+     *
+     * @return void
+     */
+    public function run_file_job_prune() {
+        if ( class_exists( 'Disciple_Tools_Migration_File_Job_Store' ) ) {
+            Disciple_Tools_Migration_File_Job_Store::prune_expired_jobs();
+        }
     }
 
     /**
