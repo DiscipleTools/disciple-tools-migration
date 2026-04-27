@@ -20,7 +20,7 @@ Imports on the destination are designed to **replace** existing data for the sel
 
 ## Where to find Migration in WordPress
 
-Open the WordPress admin, then go to **Extensions (D.T)** → **Migration**. The screen has three tabs: **Settings**, **Export**, and **Import**.
+Open the WordPress admin, then go to **Extensions (D.T)** → **Migration**. The screen has three tabs: **Settings**, **Export**, and **Import**. On **Settings**, you can set how long **file import jobs** stay in the database after a JSON upload; on **Import**, the **Recent file migration jobs** table shows status and optional **Retry** / **Delete** actions (see [Migration via file](migration-via-file.md)).
 
 <!-- Screenshot: WP Admin sidebar → Extensions (D.T) → Migration -->
 

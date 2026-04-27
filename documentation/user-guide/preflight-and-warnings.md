@@ -12,6 +12,8 @@ Use preflight when:
 
 You can still start an import without preflight; the UI offers both flows.
 
+For **file** imports, preflight uses the same **file migration job** as the import (the payload from **Upload & Preview** or **Retry** on [Migration via file](migration-via-file.md)). If the UI says no job is active, upload again or use **Retry** on a job that still has stored data.
+
 <!-- Screenshot: Preflight results list -->
 
 ![Preflight warnings and informational lines](imgs/fig-08-preflight.png)
