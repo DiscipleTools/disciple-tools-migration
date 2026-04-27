@@ -281,16 +281,15 @@ class Disciple_Tools_Migration_Import_Ajax {
 
     /**
      * Resolves the file-mode job payload for the current user, or returns an error structure.
+     * Callers must verify the AJAX nonce (handle_import_batch, handle_preflight) before this runs.
      *
-     * @param int $user_id
+     * @param int $user_id Current user.
      * @return array{ payload: array, job_id: string }|array{ error: string }
      */
     private function resolve_file_job_payload( int $user_id ) {
-        $raw = isset( $_POST['file_job_id'] ) ? wp_unslash( $_POST['file_job_id'] ) : '';
-        if ( is_array( $raw ) ) {
-            $raw = '';
-        }
-        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( (string) $raw );
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
         if ( $job_id === '' ) {
             return [
                 'error' => __( 'No file migration job was specified. Use Upload & Preview or Retry from the job list.', 'disciple-tools-migration' ),
@@ -656,11 +655,9 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
         }
 
-        $raw = isset( $_POST['job_id'] ) ? wp_unslash( $_POST['job_id'] ) : '';
-        if ( is_array( $raw ) ) {
-            $raw = '';
-        }
-        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( (string) $raw );
+        $posted = filter_input( INPUT_POST, 'job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
         if ( $job_id === '' ) {
             wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
         }
@@ -681,11 +678,9 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
         }
 
-        $raw = isset( $_POST['file_job_id'] ) ? wp_unslash( $_POST['file_job_id'] ) : '';
-        if ( is_array( $raw ) ) {
-            $raw = '';
-        }
-        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( (string) $raw );
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
         if ( $job_id === '' ) {
             wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
         }
@@ -706,11 +701,9 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
         }
 
-        $raw = isset( $_POST['file_job_id'] ) ? wp_unslash( $_POST['file_job_id'] ) : '';
-        if ( is_array( $raw ) ) {
-            $raw = '';
-        }
-        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( (string) $raw );
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
         if ( $job_id === '' ) {
             wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
         }
@@ -731,11 +724,9 @@ class Disciple_Tools_Migration_Import_Ajax {
             wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
         }
 
-        $raw = isset( $_POST['file_job_id'] ) ? wp_unslash( $_POST['file_job_id'] ) : '';
-        if ( is_array( $raw ) ) {
-            $raw = '';
-        }
-        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( (string) $raw );
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
         if ( $job_id === '' ) {
             wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
         }

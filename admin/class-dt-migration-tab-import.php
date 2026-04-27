@@ -934,7 +934,8 @@ class Disciple_Tools_Migration_Tab_Import {
             return;
         }
 
-        $filename  = isset( $_FILES['dt_migration_import_file']['name'] ) ? (string) $_FILES['dt_migration_import_file']['name'] : 'export.json';
+        $upload_name = isset( $_FILES['dt_migration_import_file']['name'] ) ? (string) wp_unslash( $_FILES['dt_migration_import_file']['name'] ) : '';
+        $filename    = ( $upload_name !== '' ) ? sanitize_file_name( $upload_name ) : 'export.json';
         $job_id    = Disciple_Tools_Migration_File_Job_Store::create_job( get_current_user_id(), $payload, $filename );
         if ( $job_id === '' ) {
             $this->connection_error = esc_html__( 'Could not store the migration file for import. The server may be out of space or the export may be too large for your database settings.', 'disciple-tools-migration' );

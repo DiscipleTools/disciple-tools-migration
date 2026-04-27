@@ -137,9 +137,8 @@ class Disciple_Tools_Migration_File_Job_Store {
     }
 
     /**
-     * @param int    $user_id
-     * @param string $job_id
-     * @return array<string, mixed>|null Full payload or null.
+     * @param string $job_id Job UUID.
+     * @return bool
      */
     public static function job_has_stored_payload( string $job_id ) : bool {
         $job_id = self::sanitize_job_id( $job_id );
@@ -182,8 +181,9 @@ class Disciple_Tools_Migration_File_Job_Store {
     }
 
     /**
-     * @param int    $user_id
-     * @param string $status
+     * @param int    $user_id User ID.
+     * @param string $job_id  Job UUID.
+     * @param string $status  One of the STATUS_* constants.
      * @return void
      */
     public static function set_status( int $user_id, string $job_id, string $status ) : void {
