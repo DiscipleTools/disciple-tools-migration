@@ -423,7 +423,7 @@ class Disciple_Tools_Migration_Export_File {
             'budget_ratio'           => $ratio,
             'bytes_per_record'       => $bytes_per_record,
             'bytes_per_user'         => $bytes_per_user,
-            'settings_overhead_bytes'=> $settings_overhead,
+            'settings_overhead_bytes' => $settings_overhead,
         ];
     }
 
@@ -552,7 +552,7 @@ class Disciple_Tools_Migration_Export_File {
                 $breakdown,
                 [
                     'estimated_total'       => $estimated,
-                    'budget_ratio_effective'=> $profile['budget_ratio'],
+                    'budget_ratio_effective' => $profile['budget_ratio'],
                 ]
             ),
         ];
