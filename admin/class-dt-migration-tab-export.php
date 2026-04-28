@@ -7,10 +7,39 @@ if ( ! defined( 'ABSPATH' ) ) { exit; } // Exit if accessed directly
  * Placeholder for the Migration Export tab. Will be wired to settings in later phases.
  */
 class Disciple_Tools_Migration_Tab_Export {
+
+    /**
+     * Shows a short-lived admin notice after redirect (e.g. file export blocked by memory heuristic).
+     *
+     * @return void
+     */
+    private function maybe_render_file_export_flash_notice() : void {
+        $key      = 'dt_migration_export_flash_notice_' . get_current_user_id();
+        $flag     = get_transient( $key );
+        if ( 'file_export_memory' !== $flag ) {
+            return;
+        }
+
+        delete_transient( $key );
+        ?>
+        <div class="notice notice-error">
+            <p>
+                <?php
+                esc_html_e(
+                    'This downloadable export is estimated to exceed the server memory limit. Use the Import tab to connect to the target site and migrate over the API instead, or reduce what is enabled for export on the Settings tab.',
+                    'disciple-tools-migration'
+                );
+                ?>
+            </p>
+        </div>
+        <?php
+    }
+
     public function content() {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
         ?>
         <div class="wrap">
+            <?php $this->maybe_render_file_export_flash_notice(); ?>
             <div id="poststuff">
                 <div id="post-body" class="metabox-holder columns-2">
                     <div id="post-body-content">
@@ -151,7 +180,7 @@ class Disciple_Tools_Migration_Tab_Export {
                             $show_export_record_filters = apply_filters( 'dt_migration_show_export_record_filters', false );
                             if ( ! empty( $record_stats ) ) :
                                 ?>
-                            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                            <form id="dt-migration-download-export-form" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                                 <input type="hidden" name="action" value="dt_migration_download_export">
                                 <?php wp_nonce_field( 'dt_migration_download_export', 'dt_migration_download_export_nonce' ); ?>
                                 <?php if ( $show_export_record_filters ) : ?>

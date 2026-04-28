@@ -95,6 +95,12 @@ class Disciple_Tools_Migration_Menu {
             'file'          => [
                 'compression' => 'zip',
             ],
+            'file_export_memory' => [
+                'budget_ratio'            => null,
+                'bytes_per_record'       => null,
+                'bytes_per_user'          => null,
+                'settings_overhead_bytes' => null,
+            ],
         ];
 
         $current = get_option( 'dt_migration_settings', [] );
@@ -102,7 +108,18 @@ class Disciple_Tools_Migration_Menu {
             $current = [];
         }
 
-        return wp_parse_args( $current, $defaults );
+        $merged = wp_parse_args( $current, $defaults );
+
+        // Shallow wp_parse_args replaces the whole file_export_memory key; merge inner keys so stale
+        // partial saves (e.g. only bytes_per_record) still fill missing keys from defaults.
+        if ( isset( $merged['file_export_memory'] ) && is_array( $merged['file_export_memory'] ) ) {
+            $merged['file_export_memory'] = wp_parse_args(
+                $merged['file_export_memory'],
+                $defaults['file_export_memory']
+            );
+        }
+
+        return $merged;
     }
 
     /**

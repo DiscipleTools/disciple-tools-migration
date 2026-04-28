@@ -38,38 +38,26 @@ class Disciple_Tools_Migration_Export_Download {
             wp_die( esc_html__( 'Migration is not enabled.', 'disciple-tools-migration' ) );
         }
 
-        $record_options = [];
         $export_by = $this->sanitize_post_type_assoc_array( 'dt_migration_export_by', 'sanitize_key' );
         $limits    = $this->sanitize_post_type_assoc_array( 'dt_migration_export_limit', 'absint' );
         $min_ids   = $this->sanitize_post_type_assoc_array( 'dt_migration_export_min_id', 'absint' );
         $max_ids   = $this->sanitize_post_type_assoc_array( 'dt_migration_export_max_id', 'absint' );
 
         $allowed_records = $settings['allowed_items']['records'] ?? [];
-        foreach ( $allowed_records as $post_type => $enabled ) {
-            if ( ! $enabled ) {
-                continue;
-            }
-            $raw_mode = isset( $export_by[ $post_type ] ) ? sanitize_key( (string) $export_by[ $post_type ] ) : 'all';
-            if ( $raw_mode === 'limit' ) {
-                $mode = 'limit';
-            } elseif ( $raw_mode === 'range' ) {
-                $mode = 'range';
-            } else {
-                $mode = 'all';
-            }
-            if ( $mode === 'all' ) {
-                continue;
-            }
-            $limit  = $mode === 'limit' ? absint( $limits[ $post_type ] ?? 0 ) : 0;
-            $min_id = $mode === 'range' ? absint( $min_ids[ $post_type ] ?? 0 ) : 0;
-            $max_id = $mode === 'range' ? absint( $max_ids[ $post_type ] ?? 0 ) : 0;
-            if ( $limit > 0 || $min_id > 0 || $max_id > 0 ) {
-                $record_options[ $post_type ] = [
-                    'limit'  => $limit,
-                    'min_id' => $min_id,
-                    'max_id' => $max_id,
-                ];
-            }
+
+        $record_options = Disciple_Tools_Migration_Export_File::parse_download_record_options(
+            is_array( $allowed_records ) ? $allowed_records : [],
+            $export_by,
+            $limits,
+            $min_ids,
+            $max_ids
+        );
+
+        $memory_check = Disciple_Tools_Migration_Export_File::evaluate_file_export_memory( $record_options );
+        if ( empty( $memory_check['allowed'] ) ) {
+            set_transient( 'dt_migration_export_flash_notice_' . get_current_user_id(), 'file_export_memory', MINUTE_IN_SECONDS );
+            wp_safe_redirect( admin_url( 'admin.php?page=disciple_tools_migration&tab=export' ) );
+            exit;
         }
 
         $payload = Disciple_Tools_Migration_Export_File::build_export( $record_options );

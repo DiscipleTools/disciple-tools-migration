@@ -13,6 +13,18 @@ class Disciple_Tools_Migration_Export_File {
 
     const EXPORT_VERSION = '1.0';
 
+    /** @var float Ratio of PHP memory_limit used as the safe budget for estimating file export size. */
+    const DEFAULT_FILE_EXPORT_MEMORY_BUDGET_RATIO = 0.2;
+
+    /** @var int Heuristic bytes per exported record (large JSON per post + connections + comments). */
+    const DEFAULT_FILE_EXPORT_BYTES_PER_RECORD = 153600;
+
+    /** @var int Heuristic bytes per WordPress user in system_users export. */
+    const DEFAULT_FILE_EXPORT_BYTES_PER_USER = 4096;
+
+    /** @var int Base overhead for settings/tiles/fields JSON blocks in the payload. */
+    const DEFAULT_FILE_EXPORT_SETTINGS_OVERHEAD_BYTES = 10485760;
+
     /**
      * Builds a full export payload (settings + records) for file download.
      *
@@ -217,6 +229,333 @@ class Disciple_Tools_Migration_Export_File {
             ];
         }
         return $stats;
+    }
+
+    /**
+     * Parses per–post-type export options from the downloadable export form (matches handle_download logic).
+     *
+     * @param array<string, bool>           $allowed_records Post type => enabled from settings.
+     * @param array<string, string>         $export_by       Raw mode per post type: all|limit|range.
+     * @param array<string, int>            $limits          Limit per post type when mode is limit.
+     * @param array<string, int>            $min_ids         Min ID when mode is range.
+     * @param array<string, int>            $max_ids         Max ID when mode is range.
+     * @return array<string, array{ limit: int, min_id: int, max_id: int }>
+     */
+    public static function parse_download_record_options( array $allowed_records, array $export_by, array $limits, array $min_ids, array $max_ids ) : array {
+        $record_options = [];
+
+        foreach ( $allowed_records as $post_type => $enabled ) {
+            if ( ! $enabled ) {
+                continue;
+            }
+
+            $raw_mode = isset( $export_by[ $post_type ] ) ? sanitize_key( (string) $export_by[ $post_type ] ) : 'all';
+            if ( 'limit' === $raw_mode ) {
+                $mode = 'limit';
+            } elseif ( 'range' === $raw_mode ) {
+                $mode = 'range';
+            } else {
+                $mode = 'all';
+            }
+
+            if ( 'all' === $mode ) {
+                continue;
+            }
+
+            $limit  = 'limit' === $mode ? absint( $limits[ $post_type ] ?? 0 ) : 0;
+            $min_id = 'range' === $mode ? absint( $min_ids[ $post_type ] ?? 0 ) : 0;
+            $max_id = 'range' === $mode ? absint( $max_ids[ $post_type ] ?? 0 ) : 0;
+
+            if ( $limit > 0 || $min_id > 0 || $max_id > 0 ) {
+                $record_options[ $post_type ] = [
+                    'limit'  => $limit,
+                    'min_id' => $min_id,
+                    'max_id' => $max_id,
+                ];
+            }
+        }
+
+        return $record_options;
+    }
+
+    /**
+     * Counts records that would be included for export (same rules as get_record_ids, without loading IDs into memory).
+     *
+     * @param string $post_type Post type.
+     * @param int    $limit     0 = no limit.
+     * @param int    $min_id    0 = no minimum ID.
+     * @param int    $max_id    0 = no maximum ID.
+     * @return int
+     */
+    public static function count_records_for_export( string $post_type, int $limit, int $min_id, int $max_id ) : int {
+        global $wpdb;
+
+        if ( $limit > 0 ) {
+            if ( $min_id > 0 && $max_id > 0 ) {
+                $count = (int) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d AND ID <= %d",
+                        $post_type,
+                        $min_id,
+                        $max_id
+                    )
+                );
+            } elseif ( $min_id > 0 ) {
+                $count = (int) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d",
+                        $post_type,
+                        $min_id
+                    )
+                );
+            } elseif ( $max_id > 0 ) {
+                $count = (int) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID <= %d",
+                        $post_type,
+                        $max_id
+                    )
+                );
+            } else {
+                $count = (int) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash'",
+                        $post_type
+                    )
+                );
+            }
+
+            return min( $limit, max( 0, $count ) );
+        }
+
+        if ( $min_id > 0 && $max_id > 0 ) {
+            return (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d AND ID <= %d",
+                    $post_type,
+                    $min_id,
+                    $max_id
+                )
+            );
+        }
+        if ( $min_id > 0 ) {
+            return (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID >= %d",
+                    $post_type,
+                    $min_id
+                )
+            );
+        }
+        if ( $max_id > 0 ) {
+            return (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash' AND ID <= %d",
+                    $post_type,
+                    $max_id
+                )
+            );
+        }
+
+        return (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = %s AND post_status != 'trash'",
+                $post_type
+            )
+        );
+    }
+
+    /**
+     * Returns effective memory heuristic settings (stored values merged with constants and filters).
+     *
+     * @return array{budget_ratio: float, bytes_per_record: int, bytes_per_user: int, settings_overhead_bytes: int}
+     */
+    public static function get_effective_file_export_memory_profile() : array {
+        $settings = [];
+        if ( class_exists( 'Disciple_Tools_Migration_Menu' ) ) {
+            $stored = Disciple_Tools_Migration_Menu::get_settings()['file_export_memory'] ?? [];
+            $settings = is_array( $stored ) ? $stored : [];
+        }
+
+        $defaults = [
+            'budget_ratio'            => null,
+            'bytes_per_record'       => null,
+            'bytes_per_user'          => null,
+            'settings_overhead_bytes' => null,
+        ];
+        $settings = wp_parse_args( $settings, $defaults );
+
+        $ratio_raw = $settings['budget_ratio'];
+        if ( null === $ratio_raw || '' === $ratio_raw ) {
+            $ratio = self::DEFAULT_FILE_EXPORT_MEMORY_BUDGET_RATIO;
+        } else {
+            $ratio = (float) $ratio_raw;
+        }
+        /** @var float $ratio */
+        $ratio = (float) apply_filters( 'dt_migration_export_memory_budget_ratio', $ratio );
+        $ratio = max( 0.05, min( 0.95, $ratio ) );
+
+        $bpr_raw = $settings['bytes_per_record'];
+        if ( null === $bpr_raw || '' === $bpr_raw ) {
+            $bytes_per_record = self::DEFAULT_FILE_EXPORT_BYTES_PER_RECORD;
+        } else {
+            $bytes_per_record = absint( $bpr_raw );
+        }
+        $bytes_per_record = (int) apply_filters( 'dt_migration_export_bytes_per_record', max( 1024, absint( $bytes_per_record ) ) );
+
+        $bpu_raw = $settings['bytes_per_user'];
+        if ( null === $bpu_raw || '' === $bpu_raw ) {
+            $bytes_per_user = self::DEFAULT_FILE_EXPORT_BYTES_PER_USER;
+        } else {
+            $bytes_per_user = absint( $bpu_raw );
+        }
+        $bytes_per_user = (int) apply_filters( 'dt_migration_export_bytes_per_user', max( 128, absint( $bytes_per_user ) ) );
+
+        $ov_raw = $settings['settings_overhead_bytes'];
+        if ( null === $ov_raw || '' === $ov_raw ) {
+            $settings_overhead = self::DEFAULT_FILE_EXPORT_SETTINGS_OVERHEAD_BYTES;
+        } else {
+            $settings_overhead = absint( $ov_raw );
+        }
+        $settings_overhead = (int) apply_filters( 'dt_migration_export_settings_overhead_bytes', max( 0, absint( $settings_overhead ) ) );
+
+        return [
+            'budget_ratio'           => $ratio,
+            'bytes_per_record'       => $bytes_per_record,
+            'bytes_per_user'         => $bytes_per_user,
+            'settings_overhead_bytes'=> $settings_overhead,
+        ];
+    }
+
+    /**
+     * Parses PHP ini memory_limit into bytes; handles unlimited (-1) with a capped fallback used only for estimating.
+     *
+     * @return int
+     */
+    public static function get_effective_ini_memory_cap_bytes() : int {
+        $mem_str = (string) ini_get( 'memory_limit' );
+        if ( function_exists( 'wp_convert_hr_to_bytes' ) ) {
+            $raw = (int) wp_convert_hr_to_bytes( $mem_str );
+        } else {
+            $raw = absint( $mem_str );
+        }
+
+        // Unlimited memory -- use a fallback cap for heuristic comparison only.
+        if ( $raw <= 0 || '-1' === $mem_str ) {
+            return (int) apply_filters( 'dt_migration_export_fallback_memory_cap_bytes', 536870912 );
+        }
+
+        return max( (int) $raw, 1 );
+    }
+
+    /**
+     * Tests whether building the JSON file export likely fits within the configured memory budget heuristic.
+     *
+     * @param array<string, array{ limit?: int, min_id?: int, max_id?: int }> $record_options Same shape as {@see build_export()}.
+     * @return array{ allowed: bool, estimated_bytes: int, budget_bytes: int, memory_limit_bytes: int, breakdown: array }
+     */
+    public static function evaluate_file_export_memory( array $record_options = [] ) : array {
+        if ( ! class_exists( 'Disciple_Tools_Migration_Menu' ) ) {
+            return [
+                'allowed'            => false,
+                'estimated_bytes'    => 0,
+                'budget_bytes'       => 0,
+                'memory_limit_bytes' => 0,
+                'breakdown'          => [ 'reason' => 'menu_unavailable' ],
+            ];
+        }
+
+        $memory_limit_bytes = self::get_effective_ini_memory_cap_bytes();
+        $profile            = self::get_effective_file_export_memory_profile();
+        $budget_bytes         = (int) floor( $memory_limit_bytes * $profile['budget_ratio'] );
+        $budget_bytes         = max( $budget_bytes, 1 );
+
+        $migration_settings = Disciple_Tools_Migration_Menu::get_settings();
+        $allowed            = $migration_settings['allowed_items'] ?? [];
+
+        $estimated = (int) $profile['settings_overhead_bytes'];
+        $breakdown = [
+            'settings_overhead_bytes' => (int) $profile['settings_overhead_bytes'],
+            'records_bytes_total'    => 0,
+            'users_bytes'            => 0,
+            'record_counts'          => [],
+            'total_user_count'       => 0,
+        ];
+
+        if ( ! empty( $allowed['system_users'] ) && function_exists( 'count_users' ) ) {
+            $totals                = count_users();
+            $total_users           = isset( $totals['total_users'] ) ? (int) $totals['total_users'] : 0;
+            $breakdown['total_user_count'] = $total_users;
+            $users_segment         = $total_users * $profile['bytes_per_user'];
+            $estimated            += $users_segment;
+            $breakdown['users_bytes'] = $users_segment;
+        }
+
+        $allowed_records = $allowed['records'] ?? [];
+        if ( ! empty( $allowed_records ) && is_array( $allowed_records ) ) {
+            foreach ( $allowed_records as $post_type => $enabled ) {
+                if ( ! $enabled ) {
+                    continue;
+                }
+
+                $opts   = $record_options[ $post_type ] ?? [];
+                $limit  = isset( $opts['limit'] ) ? absint( $opts['limit'] ) : 0;
+                $min_id = isset( $opts['min_id'] ) ? absint( $opts['min_id'] ) : 0;
+                $max_id = isset( $opts['max_id'] ) ? absint( $opts['max_id'] ) : 0;
+
+                $n = self::count_records_for_export( $post_type, $limit, $min_id, $max_id );
+
+                $per_pt = max( $profile['bytes_per_record'], (int) apply_filters(
+                    'dt_migration_export_estimated_bytes_for_post_type_single_record',
+                    $profile['bytes_per_record'],
+                    $post_type,
+                    [ 'limit' => $limit, 'min_id' => $min_id, 'max_id' => $max_id ]
+                ) );
+
+                $segment = $n * $per_pt;
+                $estimated                 += $segment;
+                $breakdown['records_bytes_total'] += $segment;
+                $breakdown['record_counts'][ $post_type ] = [
+                    'count'      => $n,
+                    'bytes_estimate' => $segment,
+                ];
+            }
+        }
+
+        $estimated = (int) apply_filters(
+            'dt_migration_export_estimated_payload_bytes_heuristic',
+            $estimated,
+            $record_options,
+            $migration_settings
+        );
+
+        $allowed_budget = $estimated <= $budget_bytes;
+
+        $allowed_budget = apply_filters(
+            'dt_migration_export_allow_file_download_by_estimate',
+            $allowed_budget,
+            [
+                'estimated_bytes'       => $estimated,
+                'budget_bytes'           => $budget_bytes,
+                'memory_limit_bytes'     => $memory_limit_bytes,
+                'profile'                => $profile,
+                'record_options'         => $record_options,
+            ]
+        );
+
+        return [
+            'allowed'            => (bool) $allowed_budget,
+            'estimated_bytes'    => $estimated,
+            'budget_bytes'       => $budget_bytes,
+            'memory_limit_bytes' => $memory_limit_bytes,
+            'breakdown'          => array_merge(
+                $breakdown,
+                [
+                    'estimated_total'       => $estimated,
+                    'budget_ratio_effective'=> $profile['budget_ratio'],
+                ]
+            ),
+        ];
     }
 
     /**

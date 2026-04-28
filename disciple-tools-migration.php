@@ -106,8 +106,11 @@ class Disciple_Tools_Migration_Plugin {
             require_once 'includes/class-dt-migration-preflight.php';
         }
 
-        if ( is_admin() ) {
+        if ( is_admin() || $is_rest ) {
             require_once 'includes/class-dt-migration-export-file.php';
+        }
+
+        if ( is_admin() ) {
             require_once 'admin/class-dt-migration-export-download.php';
             new Disciple_Tools_Migration_Export_Download();
         }

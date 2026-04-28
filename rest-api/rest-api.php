@@ -63,6 +63,18 @@ class Disciple_Tools_Migration_Endpoints {
 
         register_rest_route(
             $namespace,
+            '/export-file-preflight',
+            [
+                'methods'             => WP_REST_Server::CREATABLE,
+                'callback'            => [ $this, 'export_file_preflight' ],
+                'permission_callback' => function ( WP_REST_Request $request ) {
+                    return $this->has_permission( $request );
+                },
+            ]
+        );
+
+        register_rest_route(
+            $namespace,
             '/records/(?P<post_type>[a-zA-Z0-9_-]+)',
             [
                 'methods'             => WP_REST_Server::READABLE,
@@ -301,6 +313,123 @@ class Disciple_Tools_Migration_Endpoints {
         ];
 
         return new WP_REST_Response( $response, 200 );
+    }
+
+    /**
+     * Checks whether the downloadable JSON file export is estimated to fit in memory (matches admin download form).
+     *
+     * @param WP_REST_Request $request Body: same fields as POST to admin-post download (JSON object or application/x-www-form-urlencoded).
+     *
+     * @return WP_REST_Response
+     */
+    public function export_file_preflight( WP_REST_Request $request ) : WP_REST_Response {
+        if ( ! class_exists( 'Disciple_Tools_Migration_Menu' ) || ! class_exists( 'Disciple_Tools_Migration_Export_File' ) ) {
+            return new WP_REST_Response(
+                [
+                    'ok'      => false,
+                    'message' => __( 'Migration helpers are not available.', 'disciple-tools-migration' ),
+                    'details' => null,
+                ],
+                200
+            );
+        }
+
+        $settings = Disciple_Tools_Migration_Menu::get_settings();
+        if ( empty( $settings['enabled'] ) ) {
+            return new WP_REST_Response(
+                [
+                    'ok'      => false,
+                    'message' => __( 'Migration is not enabled.', 'disciple-tools-migration' ),
+                    'details' => null,
+                ],
+                200
+            );
+        }
+
+        $data = $this->parse_export_preflight_request_body( $request );
+        $data = dt_recursive_sanitize_array( $data );
+
+        $export_by = isset( $data['dt_migration_export_by'] ) && is_array( $data['dt_migration_export_by'] ) ? $this->sanitize_post_type_assoc( $data['dt_migration_export_by'], 'sanitize_key' ) : [];
+
+        $limits  = isset( $data['dt_migration_export_limit'] ) && is_array( $data['dt_migration_export_limit'] ) ? $this->sanitize_post_type_assoc( $data['dt_migration_export_limit'], 'absint' ) : [];
+        $min_ids = isset( $data['dt_migration_export_min_id'] ) && is_array( $data['dt_migration_export_min_id'] ) ? $this->sanitize_post_type_assoc( $data['dt_migration_export_min_id'], 'absint' ) : [];
+        $max_ids = isset( $data['dt_migration_export_max_id'] ) && is_array( $data['dt_migration_export_max_id'] ) ? $this->sanitize_post_type_assoc( $data['dt_migration_export_max_id'], 'absint' ) : [];
+
+        $allowed_records = $settings['allowed_items']['records'] ?? [];
+        $allowed_records = is_array( $allowed_records ) ? $allowed_records : [];
+
+        $record_options = Disciple_Tools_Migration_Export_File::parse_download_record_options(
+            $allowed_records,
+            $export_by,
+            $limits,
+            $min_ids,
+            $max_ids
+        );
+
+        $evaluation = Disciple_Tools_Migration_Export_File::evaluate_file_export_memory( $record_options );
+
+        return new WP_REST_Response(
+            [
+                'ok'      => ! empty( $evaluation['allowed'] ),
+                'message' => empty( $evaluation['allowed'] )
+                    ? __( 'This downloadable export is estimated to exceed the server memory limit. Use the Import tab to connect to the target site and migrate over the API instead, or reduce what is enabled for export on the Settings tab.', 'disciple-tools-migration' )
+                    : '',
+                'details' => $evaluation,
+            ],
+            200
+        );
+    }
+
+    /**
+     * Parses JSON or urlencoded body into an array of request parameters.
+     *
+     * @param WP_REST_Request $request Request.
+     * @return array<string, mixed>
+     */
+    private function parse_export_preflight_request_body( WP_REST_Request $request ) : array {
+        $raw = (string) $request->get_body();
+        if ( $raw === '' ) {
+            return [];
+        }
+
+        $trimmed = ltrim( $raw );
+        if ( $trimmed !== '' && ( '{' === $trimmed[0] || '[' === $trimmed[0] ) ) {
+            $decoded = json_decode( $raw, true );
+            if ( json_last_error() === JSON_ERROR_NONE && is_array( $decoded ) ) {
+                return $decoded;
+            }
+        }
+
+        $parsed = [];
+        parse_str( $raw, $parsed );
+
+        return is_array( $parsed ) ? wp_unslash( $parsed ) : [];
+    }
+
+    /**
+     * Sanitizes a request array keyed by post type (same semantics as downloadable export sanitize).
+     *
+     * @param array<int|string, mixed> $assoc Raw keys keyed by post type.
+     * @param string          $mode  'sanitize_key' or 'absint'.
+     * @return array<string, int|string>
+     */
+    private function sanitize_post_type_assoc( array $assoc, string $mode ) : array {
+        $out = [];
+
+        foreach ( $assoc as $raw_key => $raw_val ) {
+            $key = sanitize_key( (string) $raw_key );
+            if ( $key === '' ) {
+                continue;
+            }
+
+            if ( 'absint' === $mode ) {
+                $out[ $key ] = absint( $raw_val );
+            } else {
+                $out[ $key ] = sanitize_key( (string) $raw_val );
+            }
+        }
+
+        return $out;
     }
 
     /**

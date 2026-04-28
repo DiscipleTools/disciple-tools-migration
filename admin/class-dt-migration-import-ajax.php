@@ -33,6 +33,30 @@ class Disciple_Tools_Migration_Import_Ajax {
         }
 
         $plugin_url = plugin_dir_url( dirname( __FILE__ ) );
+        $tab       = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'settings';
+
+        if ( $tab === 'export' ) {
+            wp_enqueue_script(
+                'dt-migration-export',
+                $plugin_url . 'admin/js/export.js',
+                [ 'jquery' ],
+                '1.0.0',
+                true
+            );
+            wp_localize_script(
+                'dt-migration-export',
+                'dtMigrationExport',
+                [
+                    'preflightUrl' => esc_url_raw( rest_url( 'dt-migration/v1/export-file-preflight' ) ),
+                    'nonce'        => wp_create_nonce( 'wp_rest' ),
+                    'strings'      => [
+                        'memoryBlocked'  => __( 'This downloadable export is estimated to exceed the server memory limit. Use the Import tab to connect to the target site and migrate over the API instead, or reduce what is enabled for export on the Settings tab.', 'disciple-tools-migration' ),
+                        'preflightFailed' => __( 'Could not verify export safety. Try again or check your connection.', 'disciple-tools-migration' ),
+                    ],
+                ]
+            );
+        }
+
         wp_enqueue_script(
             'dt-migration-import',
             $plugin_url . 'admin/js/import.js',
