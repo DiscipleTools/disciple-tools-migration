@@ -126,10 +126,7 @@ class Disciple_Tools_Migration_Endpoints {
                 'supports_file_download' => true,
                 'supports_api_mode'     => true,
                 'supports_file_mode'    => true,
-                'supports_records'      => [
-                    'contacts' => ! empty( $settings['allowed_items']['records']['contacts'] ),
-                    'groups'   => ! empty( $settings['allowed_items']['records']['groups'] ),
-                ],
+                'supports_records'      => $settings['allowed_items']['records'] ?? [],
             ],
         ];
 

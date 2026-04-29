@@ -112,17 +112,28 @@ class Disciple_Tools_Migration_Tab_Settings {
                 </td>
                 <td>
                     <fieldset>
+                        <?php
+                        $record_types = Disciple_Tools_Migration_Menu::get_migratable_post_types();
+                        $records_cfg  = $settings['allowed_items']['records'] ?? [];
+                        foreach ( $record_types as $post_type ) {
+                            $label = Disciple_Tools_Migration_Menu::get_post_type_label( $post_type );
+                            ?>
                         <label>
-                            <input type="checkbox" name="dt_migration_allowed_items[records][contacts]" value="1" <?php checked( ! empty( $settings['allowed_items']['records']['contacts'] ) ); ?> />
-                            <?php esc_html_e( 'Contacts', 'disciple-tools-migration' ); ?>
+                            <input type="checkbox" name="dt_migration_allowed_items[records][<?php echo esc_attr( $post_type ); ?>]" value="1" <?php checked( ! empty( $records_cfg[ $post_type ] ) ); ?> />
+                            <?php echo esc_html( $label ); ?>
+                            <span class="description">(<?php echo esc_html( $post_type ); ?>)</span>
                         </label>
                         <br>
-                        <label>
-                            <input type="checkbox" name="dt_migration_allowed_items[records][groups]" value="1" <?php checked( ! empty( $settings['allowed_items']['records']['groups'] ) ); ?> />
-                            <?php esc_html_e( 'Groups', 'disciple-tools-migration' ); ?>
-                        </label>
+                            <?php
+                        }
+                        if ( empty( $record_types ) ) {
+                            ?>
+                        <p class="description"><?php esc_html_e( 'No Disciple.Tools record types are registered.', 'disciple-tools-migration' ); ?></p>
+                            <?php
+                        }
+                        ?>
                         <p class="description">
-                            <?php esc_html_e( 'Additional record types can be added in future phases. For selected types, imports will delete existing records on the target before re-creating them with preserved IDs.', 'disciple-tools-migration' ); ?>
+                            <?php esc_html_e( 'For selected types, imports will delete existing records on the target before re-creating them with preserved IDs.', 'disciple-tools-migration' ); ?>
                         </p>
                     </fieldset>
                 </td>
@@ -170,15 +181,11 @@ class Disciple_Tools_Migration_Tab_Settings {
         $settings['allowed_items']['workflows']        = ! empty( $allowed['workflows'] );
         $settings['allowed_items']['system_users']     = ! empty( $allowed['system_users'] );
 
-        if ( ! isset( $settings['allowed_items']['records'] ) || ! is_array( $settings['allowed_items']['records'] ) ) {
-            $settings['allowed_items']['records'] = [
-                'contacts' => true,
-                'groups'   => true,
-            ];
+        $incoming_records = isset( $allowed['records'] ) && is_array( $allowed['records'] ) ? $allowed['records'] : [];
+        $settings['allowed_items']['records'] = [];
+        foreach ( Disciple_Tools_Migration_Menu::get_migratable_post_types() as $post_type ) {
+            $settings['allowed_items']['records'][ $post_type ] = ! empty( $incoming_records[ $post_type ] );
         }
-
-        $settings['allowed_items']['records']['contacts'] = ! empty( $allowed['records']['contacts'] );
-        $settings['allowed_items']['records']['groups']   = ! empty( $allowed['records']['groups'] );
 
         Disciple_Tools_Migration_Menu::update_settings( $settings );
     }

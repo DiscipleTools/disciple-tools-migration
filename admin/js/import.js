@@ -171,7 +171,9 @@
                 records: null
             } );
         }
-        const order = [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
+        const order = ( window.dtMigrationImport && Array.isArray( window.dtMigrationImport.recordImportOrder ) && window.dtMigrationImport.recordImportOrder.length )
+            ? window.dtMigrationImport.recordImportOrder
+            : [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
         const rest = Object.keys( records ).filter( pt => ! order.includes( pt ) );
         const ordered = order.filter( pt => records[ pt ] ).concat( rest );
         const recordPts = ordered.filter( pt => records[ pt ] );
