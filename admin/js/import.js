@@ -14,7 +14,7 @@
     let $confirmGate, $modalWarning;
     let $progressBar, $progressText, $stepList, $currentPhase, $cancelImport, $importSpinner;
     let $errorDetails, $errorScroll;
-    let $pfModal, $pfInfoWrap, $pfInfoText, $pfWarningsWrap, $pfWarningsText, $pfStatus, $pfProceed, $pfClose, $pfOverlay;
+    let $pfModal, $pfInfoWrap, $pfInfoText, $pfWarningsWrap, $pfWarningsText, $pfStatus, $pfProceed, $pfClose;
     let pendingPreflightSection = null;
 
     let cancelled = false;
@@ -231,7 +231,9 @@
                 records: null
             } );
         }
-        const order = [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
+        const order = ( window.dtMigrationImport && Array.isArray( window.dtMigrationImport.recordImportOrder ) && window.dtMigrationImport.recordImportOrder.length )
+            ? window.dtMigrationImport.recordImportOrder
+            : [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
         const rest = Object.keys( records ).filter( pt => ! order.includes( pt ) );
         const ordered = order.filter( pt => records[ pt ] ).concat( rest );
         const recordPts = ordered.filter( pt => records[ pt ] );
@@ -540,7 +542,6 @@
         $pfStatus = $( '.dt-migration-preflight-status' );
         $pfProceed = $( '.dt-migration-preflight-proceed' );
         $pfClose = $( '.dt-migration-preflight-close' );
-        $pfOverlay = $pfModal.find( '.dt-migration-preflight-overlay' );
 
         if ( ! $modal.length || ! $( '.dt-migration-start-import' ).length ) {
             return;
@@ -566,10 +567,6 @@
             hideModal();
         } );
 
-        $( '.dt-migration-modal-overlay' ).on( 'click', function() {
-            hideModal();
-        } );
-
         $cancelImport.on( 'click', function() {
             cancelled = true;
             $( this ).prop( 'disabled', true ).text( 'Cancelling...' );
@@ -581,10 +578,6 @@
         } );
 
         $pfClose.on( 'click', function() {
-            pendingPreflightSection = null;
-            $pfModal.hide();
-        } );
-        $pfOverlay.on( 'click', function() {
             pendingPreflightSection = null;
             $pfModal.hide();
         } );

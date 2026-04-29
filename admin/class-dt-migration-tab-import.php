@@ -244,11 +244,12 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <?php
                                             $records       = $this->connection_result['allowed_items']['records'] ?? [];
                                             $record_labels = [];
-                                            if ( ! empty( $records['contacts'] ) ) {
-                                                $record_labels[] = esc_html__( 'Contacts', 'disciple-tools-migration' );
-                                            }
-                                            if ( ! empty( $records['groups'] ) ) {
-                                                $record_labels[] = esc_html__( 'Groups', 'disciple-tools-migration' );
+                                            if ( is_array( $records ) ) {
+                                                foreach ( $records as $post_type => $enabled ) {
+                                                    if ( ! empty( $enabled ) ) {
+                                                        $record_labels[] = Disciple_Tools_Migration_Menu::get_post_type_label( (string) $post_type );
+                                                    }
+                                                }
                                             }
                                             echo esc_html( implode( ', ', $record_labels ) );
                                             ?>

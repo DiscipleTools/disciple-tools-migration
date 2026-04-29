@@ -19,6 +19,15 @@ class Disciple_Tools_Migration_Import_Engine {
     const POST_TYPE_ORDER = [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
 
     /**
+     * Preferred order for importing record types (dependencies and deferred connections).
+     *
+     * @return string[]
+     */
+    public static function get_record_import_order(): array {
+        return self::POST_TYPE_ORDER;
+    }
+
+    /**
      * Whether we are currently in a record import (insert_or_update_post) call.
      * Used by get_post_metadata filter to fix theme bug when *_details meta returns ''.
      *
@@ -100,6 +109,14 @@ class Disciple_Tools_Migration_Import_Engine {
             return $result;
         }
 
+        // Register custom post types (dt_custom_post_types) before tiles/fields so the target site
+        // knows about CPTs that exist on the source (required for record import and Customizations UI).
+        if ( ! empty( $selected['general_settings'] ) || ! empty( $selected['tiles'] ) || ! empty( $selected['fields'] ) ) {
+            if ( self::apply_post_types( $dt_settings ) ) {
+                $result['applied']['post_types'] = true;
+            }
+        }
+
         if ( ! empty( $selected['general_settings'] ) ) {
             $general = self::apply_general_settings( $export_payload );
             if ( ! empty( $general['error'] ) ) {
@@ -161,6 +178,151 @@ class Disciple_Tools_Migration_Import_Engine {
         }
 
         return $result;
+    }
+
+    /**
+     * Merges exported post type definitions into dt_custom_post_types and registers CPTs for the current request.
+     *
+     * Without this, DT_Posts::update_post fails with "Post type does not exist" for types that only exist on the
+     * source (e.g. trainings) and customizations UI will not list them.
+     *
+     * @param array $dt_settings Export block dt_settings (dt_post_types_settings, dt_post_types_custom_settings).
+     *
+     * @return bool True if post type data was present and processing ran.
+     */
+    private static function apply_post_types( array $dt_settings ) : bool {
+        $base   = $dt_settings['dt_post_types_settings']['values'] ?? [];
+        $custom = $dt_settings['dt_post_types_custom_settings']['values'] ?? [];
+        if ( ( empty( $base ) || ! is_array( $base ) ) && ( empty( $custom ) || ! is_array( $custom ) ) ) {
+            return false;
+        }
+        if ( ! class_exists( 'DT_Posts' ) ) {
+            return false;
+        }
+
+        $registered = DT_Posts::get_post_types();
+        $existing   = get_option( 'dt_custom_post_types', [] );
+        if ( ! is_array( $existing ) ) {
+            $existing = [];
+        }
+
+        if ( ! empty( $custom ) && is_array( $custom ) ) {
+            foreach ( $custom as $slug => $meta ) {
+                if ( ! is_string( $slug ) || $slug === '' || ! is_array( $meta ) ) {
+                    continue;
+                }
+                if ( in_array( $slug, $registered, true ) ) {
+                    continue;
+                }
+                if ( ! isset( $existing[ $slug ] ) ) {
+                    $existing[ $slug ] = [];
+                }
+                $existing[ $slug ] = array_merge( $existing[ $slug ], $meta );
+                $existing[ $slug ]['is_custom'] = true;
+            }
+        }
+
+        foreach ( $base as $slug => $settings ) {
+            if ( ! is_string( $slug ) || $slug === '' || ! is_array( $settings ) ) {
+                continue;
+            }
+            if ( in_array( $slug, $registered, true ) ) {
+                continue;
+            }
+            if ( ! isset( $existing[ $slug ] ) ) {
+                $existing[ $slug ] = [];
+            }
+            $existing[ $slug ]['label_singular'] = $settings['label_singular'] ?? $existing[ $slug ]['label_singular'] ?? $slug;
+            $existing[ $slug ]['label_plural']   = $settings['label_plural'] ?? $existing[ $slug ]['label_plural'] ?? $slug;
+            if ( isset( $settings['hidden'] ) ) {
+                $existing[ $slug ]['hidden'] = (bool) $settings['hidden'];
+            }
+            $existing[ $slug ]['is_custom'] = true;
+        }
+
+        update_option( 'dt_custom_post_types', $existing, true );
+
+        $original_registered = $registered;
+        $to_register         = [];
+        foreach ( array_keys( $custom ) as $slug ) {
+            if ( is_string( $slug ) && $slug !== '' && ! in_array( $slug, $original_registered, true ) ) {
+                $to_register[] = $slug;
+            }
+        }
+        foreach ( array_keys( $base ) as $slug ) {
+            if ( is_string( $slug ) && $slug !== '' && ! in_array( $slug, $original_registered, true ) ) {
+                $to_register[] = $slug;
+            }
+        }
+        foreach ( array_unique( $to_register ) as $slug ) {
+            self::register_post_type_for_current_request( $slug );
+        }
+
+        foreach ( array_keys( $existing ) as $slug ) {
+            if ( is_string( $slug ) ) {
+                wp_cache_delete( $slug . '_post_type_settings' );
+                wp_cache_delete( $slug . '_type_settings' );
+            }
+        }
+
+        flush_rewrite_rules( false );
+
+        return true;
+    }
+
+    /**
+     * Registers CPTs from an export payload (e.g. before record import when settings step was skipped).
+     *
+     * @param array $export_payload Same shape as API/file import (export.dt_settings).
+     */
+    public static function bootstrap_post_types_from_export( array $export_payload ) : void {
+        $export = $export_payload['export'] ?? [];
+        if ( ! is_array( $export ) ) {
+            return;
+        }
+        $dt_settings = $export['dt_settings'] ?? [];
+        if ( ! is_array( $dt_settings ) ) {
+            return;
+        }
+        self::apply_post_types( $dt_settings );
+    }
+
+    /**
+     * Instantiates Disciple_Tools_Post_Type_Template and registers the post type for this request (after init).
+     *
+     * @param string $post_type Post type slug.
+     */
+    private static function register_post_type_for_current_request( string $post_type ) : void {
+        if ( ! class_exists( 'DT_Posts' ) || ! class_exists( 'Disciple_Tools_Post_Type_Template' ) ) {
+            return;
+        }
+        if ( post_type_exists( $post_type ) ) {
+            return;
+        }
+        if ( in_array( $post_type, DT_Posts::get_post_types(), true ) ) {
+            return;
+        }
+        $custom = get_option( 'dt_custom_post_types', [] );
+        if ( ! is_array( $custom ) || empty( $custom[ $post_type ] ) || empty( $custom[ $post_type ]['is_custom'] ) ) {
+            return;
+        }
+        $c   = $custom[ $post_type ];
+        $tpl = new Disciple_Tools_Post_Type_Template(
+            $post_type,
+            $c['label_singular'] ?? $post_type,
+            $c['label_plural'] ?? $post_type
+        );
+        $tpl->register_post_type();
+        $tpl->rewrite_init();
+    }
+
+    /**
+     * Ensures a post type from dt_custom_post_types is registered (e.g. new HTTP request after settings import).
+     *
+     * @param string $post_type Post type slug.
+     */
+    private static function ensure_post_type_registered_from_options( string $post_type ) : void {
+        self::register_post_type_for_current_request( $post_type );
     }
 
     /**
@@ -345,6 +507,8 @@ class Disciple_Tools_Migration_Import_Engine {
             $result['errors'][] = __( 'DT_Posts not available.', 'disciple-tools-migration' );
             return $result;
         }
+
+        self::ensure_post_type_registered_from_options( $post_type );
 
         // On first batch, delete existing posts of this type (destructive).
         if ( $offset === 0 ) {

@@ -44,12 +44,16 @@ class Disciple_Tools_Migration_Import_Ajax {
             '0.4.0',
             true
         );
+        $record_order = class_exists( 'Disciple_Tools_Migration_Import_Engine' )
+            ? Disciple_Tools_Migration_Import_Engine::get_record_import_order()
+            : [ 'peoplegroups', 'groups', 'contacts', 'trainings' ];
         wp_localize_script(
             'dt-migration-import',
             'dtMigrationImport',
             [
                 'ajaxUrl' => admin_url( 'admin-ajax.php' ),
                 'nonce'   => wp_create_nonce( 'dt_migration_import' ),
+                'recordImportOrder' => array_values( $record_order ),
                 'fileJobId' => '',
                 'strings' => [
                     'continue'               => __( 'Continue', 'disciple-tools-migration' ),
@@ -231,6 +235,27 @@ class Disciple_Tools_Migration_Import_Ajax {
                 wp_send_json_error( [ 'message' => __( 'Post type required.', 'disciple-tools-migration' ) ] );
             }
 
+            if ( $init_q ) {
+                $export_res = wp_remote_post(
+                    $base . '/wp-json/dt-migration/v1/export',
+                    [
+                        'timeout' => 60,
+                        'headers' => [
+                            'Authorization' => 'Bearer ' . $jwt,
+                            'Content-Type'  => 'application/json',
+                        ],
+                        'body'    => wp_json_encode( [ 'settings_only' => true ] ),
+                    ]
+                );
+                if ( ! is_wp_error( $export_res ) ) {
+                    $ex_code = wp_remote_retrieve_response_code( $export_res );
+                    $ex_body = json_decode( (string) wp_remote_retrieve_body( $export_res ), true );
+                    if ( $ex_code >= 200 && $ex_code < 300 && is_array( $ex_body ) ) {
+                        Disciple_Tools_Migration_Import_Engine::bootstrap_post_types_from_export( $ex_body );
+                    }
+                }
+            }
+
             $records_url = add_query_arg(
                 [ 'offset' => $offset, 'limit' => $limit ],
                 $base . '/wp-json/dt-migration/v1/records/' . $post_type
@@ -404,6 +429,10 @@ class Disciple_Tools_Migration_Import_Ajax {
             $total     = count( $records_all );
             $slice     = array_slice( $records_all, $offset, $limit );
             $has_more  = ( $offset + count( $slice ) ) < $total;
+
+            if ( $init_q ) {
+                Disciple_Tools_Migration_Import_Engine::bootstrap_post_types_from_export( $payload );
+            }
 
             try {
                 $batch_result = Disciple_Tools_Migration_Import_Engine::import_records_batch( $post_type, $slice, $offset, $init_q );

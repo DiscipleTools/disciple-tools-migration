@@ -62,6 +62,74 @@ class Disciple_Tools_Migration_Menu {
     } // End __construct()
 
     /**
+     * Post type slugs returned by Disciple.Tools for migratable records, or a minimal fallback.
+     *
+     * @return string[]
+     */
+    public static function get_migratable_post_types(): array {
+        if ( class_exists( 'DT_Posts' ) ) {
+            $types = DT_Posts::get_post_types();
+            return is_array( $types ) ? array_values( array_unique( $types ) ) : [];
+        }
+        return [ 'contacts', 'groups' ];
+    }
+
+    /**
+     * Default "allowed" flag for record migration for a post type (new installs / newly registered types).
+     *
+     * @param string $post_type Sanitized post type slug.
+     */
+    public static function get_default_record_allowed_for_type( string $post_type ): bool {
+        return in_array( $post_type, [ 'contacts', 'groups' ], true );
+    }
+
+    /**
+     * Merges stored record toggles with all current DT post types.
+     *
+     * @param array<string, mixed> $stored Values from options (may omit new types or contain stale keys).
+     *
+     * @return array<string, bool>
+     */
+    public static function normalize_records_allowed( array $stored ): array {
+        $types = self::get_migratable_post_types();
+        $out   = [];
+
+        foreach ( $types as $post_type ) {
+            if ( array_key_exists( $post_type, $stored ) ) {
+                $out[ $post_type ] = ! empty( $stored[ $post_type ] );
+            } else {
+                $out[ $post_type ] = self::get_default_record_allowed_for_type( $post_type );
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Human-readable label for a DT post type (plural preferred).
+     *
+     * @param string $post_type Post type slug.
+     */
+    public static function get_post_type_label( string $post_type ): string {
+        if ( ! class_exists( 'DT_Posts' ) ) {
+            return $post_type;
+        }
+        try {
+            $settings = DT_Posts::get_post_settings( $post_type, false );
+            if ( is_array( $settings ) ) {
+                if ( ! empty( $settings['label_plural'] ) ) {
+                    return (string) $settings['label_plural'];
+                }
+                if ( ! empty( $settings['label'] ) ) {
+                    return (string) $settings['label'];
+                }
+            }
+        } catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
+        }
+        return $post_type;
+    }
+
+    /**
      * Returns the current migration settings from the options table.
      *
      * @return array
@@ -103,7 +171,14 @@ class Disciple_Tools_Migration_Menu {
             $current = [];
         }
 
-        return wp_parse_args( $current, $defaults );
+        $parsed = wp_parse_args( $current, $defaults );
+        if ( ! isset( $parsed['allowed_items'] ) || ! is_array( $parsed['allowed_items'] ) ) {
+            $parsed['allowed_items'] = $defaults['allowed_items'];
+        }
+        $rec = $parsed['allowed_items']['records'] ?? [];
+        $parsed['allowed_items']['records'] = self::normalize_records_allowed( is_array( $rec ) ? $rec : [] );
+
+        return $parsed;
     }
 
     /**
