@@ -543,6 +543,36 @@
         $pfProceed = $( '.dt-migration-preflight-proceed' );
         $pfClose = $( '.dt-migration-preflight-close' );
 
+        // Recent-jobs Delete works on any page with the jobs table, even when no
+        // upload preview is visible. Register before the modal guard below.
+        $( document ).on( 'click', '.dt-migration-file-job-delete', function( e ) {
+            e.preventDefault();
+            const $btn = $( this );
+            const id = $btn.data( 'job-id' );
+            if ( ! id || ! window.confirm( t( 'deleteFileJobConfirm', 'Delete this file migration job and its stored data?' ) ) ) {
+                return;
+            }
+            if ( typeof dtMigrationImport === 'undefined' ) {
+                return;
+            }
+            $btn.prop( 'disabled', true );
+            $.post( dtMigrationImport.ajaxUrl, {
+                action: 'dt_migration_file_job_delete',
+                nonce: dtMigrationImport.nonce,
+                job_id: id
+            } ).done( function( r ) {
+                if ( r.success ) {
+                    window.location.reload();
+                    return;
+                }
+                window.alert( ( r.data && r.data.message ) ? r.data.message : t( 'deleteFileJobFailed', 'Could not delete the job.' ) );
+                $btn.prop( 'disabled', false );
+            } ).fail( function() {
+                window.alert( t( 'deleteFileJobFailed', 'Could not delete the job.' ) );
+                $btn.prop( 'disabled', false );
+            } );
+        } );
+
         if ( ! $modal.length || ! $( '.dt-migration-start-import' ).length ) {
             return;
         }
@@ -607,33 +637,6 @@
             $section.find( '.dt-migration-record-checkbox' ).prop( 'checked', checked );
         } );
 
-        $( document ).on( 'click', '.dt-migration-file-job-delete', function( e ) {
-            e.preventDefault();
-            const $btn = $( this );
-            const id = $btn.data( 'job-id' );
-            if ( ! id || ! window.confirm( t( 'deleteFileJobConfirm', 'Delete this file migration job and its stored data?' ) ) ) {
-                return;
-            }
-            if ( typeof dtMigrationImport === 'undefined' ) {
-                return;
-            }
-            $btn.prop( 'disabled', true );
-            $.post( dtMigrationImport.ajaxUrl, {
-                action: 'dt_migration_file_job_delete',
-                nonce: dtMigrationImport.nonce,
-                job_id: id
-            } ).done( function( r ) {
-                if ( r.success ) {
-                    window.location.reload();
-                    return;
-                }
-                window.alert( ( r.data && r.data.message ) ? r.data.message : t( 'deleteFileJobFailed', 'Could not delete the job.' ) );
-                $btn.prop( 'disabled', false );
-            } ).fail( function() {
-                window.alert( t( 'deleteFileJobFailed', 'Could not delete the job.' ) );
-                $btn.prop( 'disabled', false );
-            } );
-        } );
     }
 
     $( document ).ready( init );
