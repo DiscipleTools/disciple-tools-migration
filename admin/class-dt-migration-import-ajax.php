@@ -454,6 +454,22 @@ class Disciple_Tools_Migration_Import_Ajax {
                 ] );
             }
 
+            // Apply per-user private meta (dt_post_user_meta) for the post IDs in this slice.
+            $slice_post_ids = [];
+            foreach ( $slice as $rec ) {
+                if ( isset( $rec['ID'] ) ) {
+                    $slice_post_ids[] = (int) $rec['ID'];
+                }
+            }
+            $pum_rows   = $payload['post_user_meta'][ $post_type ] ?? [];
+            $pum_result = Disciple_Tools_Migration_Import_Engine::import_post_user_meta_for_posts(
+                is_array( $pum_rows ) ? $pum_rows : [],
+                $slice_post_ids
+            );
+            if ( ! empty( $pum_result['errors'] ) ) {
+                $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $pum_result['errors'] );
+            }
+
             wp_send_json_success( [
                 'done'            => ! $has_more,
                 'phase'           => 'records',

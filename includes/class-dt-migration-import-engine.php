@@ -821,6 +821,83 @@ class Disciple_Tools_Migration_Import_Engine {
      *
      * @return int Number deleted, or -1 on error.
      */
+    /**
+     * Imports per-user private meta (dt_post_user_meta) for a slice of post IDs.
+     *
+     * Replace semantics: deletes all existing dt_post_user_meta rows for the in-scope
+     * post IDs, then inserts the rows from the export whose post_id is in scope.
+     * The source-side user_id is remapped via {@see Disciple_Tools_Migration_System_Users::remap_user_id()}.
+     *
+     * Rows whose remapped user does not exist on the target are skipped with a logged warning.
+     * Rows whose post_id is not in scope are silently ignored (they belong to a different batch).
+     *
+     * @param array<int, array{ post_id:int, user_id:int, meta_key:string, meta_value:mixed, date:?string, category:?string }> $rows
+     * @param int[] $post_ids_in_scope Post IDs covered by the current batch (already inserted).
+     * @return array{ inserted:int, errors: string[] }
+     */
+    public static function import_post_user_meta_for_posts( array $rows, array $post_ids_in_scope ) : array {
+        $result = [ 'inserted' => 0, 'errors' => [] ];
+
+        $post_ids = array_values( array_unique( array_filter( array_map( 'intval', $post_ids_in_scope ) ) ) );
+        if ( empty( $post_ids ) ) {
+            return $result;
+        }
+
+        global $wpdb;
+        $placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->dt_post_user_meta} WHERE post_id IN ( $placeholders )",
+                $post_ids
+            )
+        );
+        // phpcs:enable
+
+        if ( empty( $rows ) ) {
+            return $result;
+        }
+
+        $scope = array_flip( $post_ids );
+        foreach ( $rows as $row ) {
+            $pid = isset( $row['post_id'] ) ? (int) $row['post_id'] : 0;
+            if ( $pid <= 0 || ! isset( $scope[ $pid ] ) ) {
+                continue;
+            }
+            $source_uid = isset( $row['user_id'] ) ? (int) $row['user_id'] : 0;
+            if ( $source_uid <= 0 ) {
+                continue;
+            }
+            $target_uid = Disciple_Tools_Migration_System_Users::remap_user_id( $source_uid );
+            if ( $target_uid <= 0 || ! get_user_by( 'id', $target_uid ) ) {
+                $result['errors'][] = sprintf(
+                    /* translators: 1: post ID, 2: source user ID */
+                    __( 'Skipped post_user_meta row (post #%1$d): no target user for source user %2$d.', 'disciple-tools-migration' ),
+                    $pid,
+                    $source_uid
+                );
+                continue;
+            }
+
+            $ok = $wpdb->insert(
+                $wpdb->dt_post_user_meta,
+                [
+                    'user_id'    => $target_uid,
+                    'post_id'    => $pid,
+                    'meta_key'   => (string) ( $row['meta_key'] ?? '' ),
+                    'meta_value' => $row['meta_value'] ?? '',
+                    'date'       => $row['date'] ?? null,
+                    'category'   => $row['category'] ?? null,
+                ]
+            );
+            if ( $ok ) {
+                ++$result['inserted'];
+            }
+        }
+
+        return $result;
+    }
+
     public static function delete_posts_by_type( string $post_type ) : int {
         $query = new WP_Query(
             [
@@ -1265,6 +1342,40 @@ class Disciple_Tools_Migration_Import_Engine {
     }
 
     /**
+     * Normalizes a link field from export format to DT_Posts update format.
+     *
+     * Export returns links as [{ type, value, meta_id }, ...].
+     * DT_Posts::update_post expects { values: [ { type, value }, ... ], force_values?: true }.
+     *
+     * meta_id is stripped: it refers to the source-site postmeta row, and passing it would
+     * send the entry through the "update existing" branch and update the wrong row (or none).
+     *
+     * @param mixed $value Link data from export.
+     * @return array{ values: array, force_values: bool }
+     */
+    private static function normalize_link_for_import( $value ) : array {
+        if ( is_array( $value ) && isset( $value['values'] ) ) {
+            return [
+                'values'       => array_values( (array) $value['values'] ),
+                'force_values' => ! empty( $value['force_values'] ),
+            ];
+        }
+        $values = [];
+        if ( is_array( $value ) ) {
+            foreach ( $value as $item ) {
+                if ( ! is_array( $item ) || ! isset( $item['type'] ) || ! array_key_exists( 'value', $item ) ) {
+                    continue;
+                }
+                $values[] = [
+                    'type'  => (string) $item['type'],
+                    'value' => $item['value'],
+                ];
+            }
+        }
+        return [ 'values' => $values, 'force_values' => true ];
+    }
+
+    /**
      * Extracts the value from a multi-select, location, or tags item.
      *
      * Handles: plain values, arrays with value/key (multi_select), grid_id/id (location).
@@ -1340,6 +1451,8 @@ class Disciple_Tools_Migration_Import_Engine {
         $connection_types     = [];
         $multi_select_types   = [];
         $user_select_types    = [];
+        $link_types           = [];
+        $private_field_types  = [];
         if ( class_exists( 'DT_Posts' ) ) {
             $post_settings      = DT_Posts::get_post_settings( $post_type, false );
             $connection_types   = (array) ( $post_settings['connection_types'] ?? [] );
@@ -1349,8 +1462,15 @@ class Disciple_Tools_Migration_Import_Engine {
                 if ( ! isset( $fs['type'] ) ) {
                     continue;
                 }
+                // Private field values flow through the post_user_meta block, never through records.
+                if ( $fs['type'] === 'task' || ! empty( $fs['private'] ) ) {
+                    $private_field_types[] = $fk;
+                    continue;
+                }
                 if ( $fs['type'] === 'user_select' ) {
                     $user_select_types[] = $fk;
+                } elseif ( $fs['type'] === 'link' ) {
+                    $link_types[] = $fk;
                 } elseif ( in_array( $fs['type'], $values_based_types, true ) ) {
                     $multi_select_types[] = $fk;
                 }
@@ -1361,12 +1481,17 @@ class Disciple_Tools_Migration_Import_Engine {
             if ( in_array( $key, $exclude, true ) ) {
                 continue;
             }
+            if ( in_array( $key, $private_field_types, true ) ) {
+                continue;
+            }
             if ( in_array( $key, $connection_types, true ) ) {
                 $fields[ $key ] = self::normalize_connection_for_import( $value );
             } elseif ( in_array( $key, $multi_select_types, true ) ) {
                 $fields[ $key ] = self::normalize_multi_select_for_import( $value );
             } elseif ( in_array( $key, $user_select_types, true ) ) {
                 $fields[ $key ] = self::normalize_and_remap_user_select_for_import( $value );
+            } elseif ( in_array( $key, $link_types, true ) ) {
+                $fields[ $key ] = self::normalize_link_for_import( $value );
             } else {
                 $fields[ $key ] = self::normalize_field_value_for_import( $value );
             }
