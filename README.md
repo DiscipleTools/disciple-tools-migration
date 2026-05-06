@@ -23,7 +23,7 @@ Go to **Extensions (D.T)** → **Migration** in the WordPress admin to configure
 
 ## Documentation
 
-Step-by-step guides (file vs API), preflight, troubleshooting, and REST reference: see **[documentation/README.md](documentation/README.md)**.
+Step-by-step guides (file vs API), preflight, troubleshooting, and REST reference: see **[documentation/README.md]([documentation/README.md](https://github.com/DiscipleTools/disciple-tools-migration/blob/master/documentation/README.md))**.
 
 ## Requirements
 
