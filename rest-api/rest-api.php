@@ -366,24 +366,35 @@ class Disciple_Tools_Migration_Endpoints {
         $ids      = $wp_query->posts ?? [];
         $total    = (int) ( $wp_query->found_posts ?? 0 );
 
-        $records = [];
-        foreach ( $ids as $post_id ) {
-            $post = DT_Posts::get_post( $post_type, (int) $post_id, true, false );
-            if ( ! is_wp_error( $post ) && is_array( $post ) ) {
-                if ( class_exists( 'Disciple_Tools_Migration_Import_Engine' ) ) {
-                    $post = Disciple_Tools_Migration_Import_Engine::attach_migration_comments_to_record( $post_type, $post );
+        $records         = [];
+        $original_user_id = get_current_user_id();
+        wp_set_current_user( 0 );
+        try {
+            foreach ( $ids as $post_id ) {
+                $post = DT_Posts::get_post( $post_type, (int) $post_id, false, false );
+                if ( ! is_wp_error( $post ) && is_array( $post ) ) {
+                    if ( class_exists( 'Disciple_Tools_Migration_Import_Engine' ) ) {
+                        $post = Disciple_Tools_Migration_Import_Engine::attach_migration_comments_to_record( $post_type, $post );
+                    }
+                    $records[] = $post;
                 }
-                $records[] = $post;
             }
+        } finally {
+            wp_set_current_user( $original_user_id );
         }
+
+        $post_user_meta = class_exists( 'Disciple_Tools_Migration_Export_File' )
+            ? Disciple_Tools_Migration_Export_File::fetch_post_user_meta( array_map( 'intval', $ids ) )
+            : [];
 
         return new WP_REST_Response(
             [
-                'records'  => $records,
-                'total'    => $total,
-                'offset'   => $offset,
-                'limit'    => $limit,
-                'has_more' => ( $offset + count( $records ) ) < $total,
+                'records'        => $records,
+                'post_user_meta' => $post_user_meta,
+                'total'          => $total,
+                'offset'         => $offset,
+                'limit'          => $limit,
+                'has_more'       => ( $offset + count( $records ) ) < $total,
             ],
             200
         );

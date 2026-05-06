@@ -25,6 +25,10 @@ API imports use a **bearer token** stored on the destination after a successful 
 
 JSON export files contain **PII and ministry data**. Encrypt at rest and limit distribution to trusted operators.
 
+### File import jobs on the destination
+
+When you **Upload & Preview** on the destination, the plugin stores a copy of the decoded export in the **WordPress database** (per user, as a **job** with metadata) so chunked preflight and import can run without a short time limit. After a **successful** import, the large payload is typically **removed** while a small **success** record may remain in the job list until automatic or manual cleanup. Operators with access to the Migration screens can **delete** jobs from the list; retention in days is configurable under **Settings** → **File import jobs** (see [Settings and scope](../user-guide/settings-and-scope.md)). Treat database backups as including any not-yet-pruned job payloads.
+
 ## Capabilities
 
 Migration admin UI and REST permission checks rely on **`manage_dt`**. Some user operations may require **`promote_users`** or other WordPress caps when creating or elevating accounts.

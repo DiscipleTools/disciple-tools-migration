@@ -36,6 +36,18 @@ For each selected type, importing on a destination **removes existing records of
 
 Save changes with **Save Settings**.
 
+## File import jobs (retention)
+
+On the same **Settings** tab, the **File import jobs** section controls how long **completed file migration jobs** remain in the database before the site removes them automatically. Each time you use **Upload & Preview** on the **Import** tab, the destination stores the JSON as a **job** (see [Migration via file](migration-via-file.md)) so long imports are not cut off by a short session window.
+
+- **Remove file migration jobs after (days):** enter a value between **1** and **365** (default is **7**). Jobs older than this are pruned on a schedule and when you save these settings. Lower the number if you need to free space sooner; raise it if you want the **Recent file migration jobs** list on the Import tab to show history for longer.
+
+Saving **Settings** also runs a one-time cleanup pass against jobs past this age.
+
+<!-- PLACEHOLDER: Replace with a screenshot of the Settings tab showing the "File import jobs" row and the days field. -->
+
+![Settings: file import job retention (days)](imgs/fig-10-settings-file-jobs.png)
+
 ## API connection storage (destination)
 
 The plugin stores the **source site base URL** and a **JWT** obtained after a successful connection test (see [Migration via API](migration-via-api.md)). **Username and password** used to fetch the token are **not** stored. JWT and URL are kept in the migration settings option for subsequent API import batches.
@@ -47,4 +59,5 @@ The plugin stores the **source site base URL** and a **JWT** obtained after a su
 ## See also
 
 - [Export tab](migration-via-file.md) — how the download reflects these choices
+- [Migration via file](migration-via-file.md) — **Recent file migration jobs**, **Retry**, and how retention relates to the day limit above
 - [REST API capabilities](../reference/rest-api.md) — how the source reports `allowed_items`

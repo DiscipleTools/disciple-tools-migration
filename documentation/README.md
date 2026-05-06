@@ -28,7 +28,7 @@ This folder contains user and reference documentation for moving Disciple.Tools 
 1. Install and activate the plugin on **source** and **destination** Disciple.Tools sites (see [Overview](user-guide/overview.md)).
 2. On the **source** site, open **Extensions (D.T)** → **Migration** → **Settings**: enable migration and select what to export (including record types).
 3. On the **source** site, open **Export** and download the JSON package.
-4. Move the file to a secure location and upload it on the **destination** site under **Import**.
+4. Move the file to a secure location and upload it on the **destination** site under **Import** (**Upload & Preview**). The destination creates a **file migration job** (stored in the database) so long runs can complete; you can track status in **Recent file migration jobs** and adjust retention under **Settings** → **File import jobs** (see [Settings and scope](user-guide/settings-and-scope.md)).
 5. Optionally run **preflight**, review warnings, then start the import.
 
 ### B. API-based (direct site-to-site)
@@ -41,4 +41,11 @@ Both channels respect the same scope rules and the same import semantics on the 
 
 ## Screenshots
 
-Illustrations live next to the guides that reference them, under each section’s `imgs/` directory. Filenames are placeholders until real screenshots are added.
+Illustrations live next to the guides that reference them, under each section’s `imgs/` directory.
+
+| File (under `user-guide/imgs/`) | Used in |
+|--------------------------------|---------|
+| `fig-10-settings-file-jobs.png` | [Settings and scope](user-guide/settings-and-scope.md) — **File import jobs** retention |
+| `fig-11-import-recent-file-jobs.png` | [Migration via file](user-guide/migration-via-file.md) — **Recent file migration jobs** table |
+
+Add or replace these PNGs locally if the links in the Markdown are missing or broken in your preview.

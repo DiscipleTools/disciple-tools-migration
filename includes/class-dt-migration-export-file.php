@@ -37,7 +37,8 @@ class Disciple_Tools_Migration_Export_File {
             $export_block['system_users'] = Disciple_Tools_Migration_System_Users::build_export_payload();
         }
 
-        $records = [];
+        $records         = [];
+        $post_user_meta  = [];
         $allowed_records = $allowed['records'] ?? [];
         if ( ! empty( $allowed_records ) && is_array( $allowed_records ) ) {
             foreach ( $allowed_records as $post_type => $enabled ) {
@@ -49,7 +50,9 @@ class Disciple_Tools_Migration_Export_File {
                 $min_id = isset( $opts['min_id'] ) ? absint( $opts['min_id'] ) : 0;
                 $max_id = isset( $opts['max_id'] ) ? absint( $opts['max_id'] ) : 0;
 
-                $records[ $post_type ] = self::fetch_records( $post_type, $limit, $min_id, $max_id );
+                $ids                       = self::get_record_ids( $post_type, $limit, $min_id, $max_id );
+                $records[ $post_type ]     = self::fetch_records_for_ids( $post_type, $ids );
+                $post_user_meta[ $post_type ] = self::fetch_post_user_meta( $ids );
             }
         }
 
@@ -62,8 +65,9 @@ class Disciple_Tools_Migration_Export_File {
                 'mode'          => 'file',
                 'allowed_items' => $allowed,
             ],
-            'export'   => $export_block,
-            'records'  => $records,
+            'export'         => $export_block,
+            'records'        => $records,
+            'post_user_meta' => $post_user_meta,
         ];
     }
 
@@ -79,17 +83,90 @@ class Disciple_Tools_Migration_Export_File {
      */
     public static function fetch_records( string $post_type, int $limit = 0, int $min_id = 0, int $max_id = 0 ) : array {
         $ids = self::get_record_ids( $post_type, $limit, $min_id, $max_id );
-        $records = [];
-        foreach ( $ids as $post_id ) {
-            $post = DT_Posts::get_post( $post_type, $post_id, true, false );
-            if ( ! is_wp_error( $post ) && is_array( $post ) ) {
-                if ( class_exists( 'Disciple_Tools_Migration_Import_Engine' ) ) {
-                    $post = Disciple_Tools_Migration_Import_Engine::attach_migration_comments_to_record( $post_type, $post );
+        return self::fetch_records_for_ids( $post_type, $ids );
+    }
+
+    /**
+     * Fetches records for a fixed list of post IDs.
+     *
+     * Switches the current user to 0 around each DT_Posts::get_post() call so the
+     * dt_post_user_meta query inside the theme returns no rows. This keeps
+     * exporter-specific private meta (tasks, private favorites/inputs/etc.) out of
+     * the per-record payload — full per-user private state is exported separately
+     * via {@see self::fetch_post_user_meta()}.
+     *
+     * @param string $post_type
+     * @param int[]  $ids
+     * @return array
+     */
+    private static function fetch_records_for_ids( string $post_type, array $ids ) : array {
+        $records         = [];
+        $original_user_id = get_current_user_id();
+        wp_set_current_user( 0 );
+        try {
+            foreach ( $ids as $post_id ) {
+                $post = DT_Posts::get_post( $post_type, (int) $post_id, false, false );
+                if ( ! is_wp_error( $post ) && is_array( $post ) ) {
+                    if ( class_exists( 'Disciple_Tools_Migration_Import_Engine' ) ) {
+                        $post = Disciple_Tools_Migration_Import_Engine::attach_migration_comments_to_record( $post_type, $post );
+                    }
+                    $records[] = $post;
                 }
-                $records[] = $post;
             }
+        } finally {
+            wp_set_current_user( $original_user_id );
         }
         return $records;
+    }
+
+    /**
+     * Dumps wp_dt_post_user_meta rows for the given post IDs.
+     *
+     * Carries every per-user private value (tasks, private favorites, private inputs,
+     * private link/multi_select/key_select/etc.) regardless of who created it. The
+     * source-side primary key id is stripped — re-imports MUST NOT re-use it.
+     *
+     * @param int[] $post_ids
+     * @return array<int, array{ post_id:int, user_id:int, meta_key:string, meta_value:string, date:?string, category:?string }>
+     */
+    public static function fetch_post_user_meta( array $post_ids ) : array {
+        if ( empty( $post_ids ) ) {
+            return [];
+        }
+        global $wpdb;
+        $post_ids = array_values( array_map( 'intval', $post_ids ) );
+        $placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT post_id, user_id, meta_key, meta_value, date, category
+                 FROM {$wpdb->dt_post_user_meta}
+                 WHERE post_id IN ( $placeholders )
+                 ORDER BY post_id ASC, user_id ASC, id ASC",
+                $post_ids
+            ),
+            ARRAY_A
+        );
+        // phpcs:enable
+
+        if ( ! is_array( $rows ) ) {
+            return [];
+        }
+
+        return array_map(
+            static function ( array $row ) : array {
+                return [
+                    'post_id'    => (int) $row['post_id'],
+                    'user_id'    => (int) $row['user_id'],
+                    'meta_key'   => (string) $row['meta_key'],
+                    'meta_value' => $row['meta_value'],
+                    'date'       => $row['date'],
+                    'category'   => $row['category'],
+                ];
+            },
+            $rows
+        );
     }
 
     /**

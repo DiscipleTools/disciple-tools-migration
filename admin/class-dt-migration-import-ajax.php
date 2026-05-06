@@ -16,6 +16,10 @@ class Disciple_Tools_Migration_Import_Ajax {
     public function __construct() {
         add_action( 'wp_ajax_dt_migration_import_batch', [ $this, 'handle_import_batch' ] );
         add_action( 'wp_ajax_dt_migration_preflight', [ $this, 'handle_preflight' ] );
+        add_action( 'wp_ajax_dt_migration_file_job_delete', [ $this, 'handle_file_job_delete' ] );
+        add_action( 'wp_ajax_dt_migration_file_job_complete', [ $this, 'handle_file_job_complete' ] );
+        add_action( 'wp_ajax_dt_migration_file_job_failed', [ $this, 'handle_file_job_failed' ] );
+        add_action( 'wp_ajax_dt_migration_file_job_cancelled', [ $this, 'handle_file_job_cancelled' ] );
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
     }
 
@@ -37,7 +41,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             'dt-migration-import',
             $plugin_url . 'admin/js/import.js',
             [ 'jquery' ],
-            '0.3.6',
+            '0.4.0',
             true
         );
         $record_order = class_exists( 'Disciple_Tools_Migration_Import_Engine' )
@@ -47,9 +51,10 @@ class Disciple_Tools_Migration_Import_Ajax {
             'dt-migration-import',
             'dtMigrationImport',
             [
-                'ajaxUrl'           => admin_url( 'admin-ajax.php' ),
-                'nonce'             => wp_create_nonce( 'dt_migration_import' ),
+                'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+                'nonce'   => wp_create_nonce( 'dt_migration_import' ),
                 'recordImportOrder' => array_values( $record_order ),
+                'fileJobId' => '',
                 'strings' => [
                     'continue'               => __( 'Continue', 'disciple-tools-migration' ),
                     'confirm'                => __( 'Confirm', 'disciple-tools-migration' ),
@@ -66,6 +71,9 @@ class Disciple_Tools_Migration_Import_Ajax {
                     'preflightRunning'       => __( 'Running preflight…', 'disciple-tools-migration' ),
                     'preflightFailed'        => __( 'Preflight request failed.', 'disciple-tools-migration' ),
                     'runPreflight'           => __( 'Run preflight', 'disciple-tools-migration' ),
+                    'deleteFileJobConfirm'   => __( 'Delete this file migration job and its stored data?', 'disciple-tools-migration' ),
+                    'deleteFileJobFailed'    => __( 'Could not delete the job.', 'disciple-tools-migration' ),
+                    'preflightFileJobMissing' => __( 'No file migration job is active. Use Upload & Preview or Retry from the job list first.', 'disciple-tools-migration' ),
                 ],
             ]
         );
@@ -110,6 +118,11 @@ class Disciple_Tools_Migration_Import_Ajax {
             .dt-migration-error-details { margin-top: 16px; padding: 12px; background: #fcf0f1; border: 1px solid #d63638; border-radius: 4px; }
             .dt-migration-error-details strong { display: block; margin-bottom: 8px; color: #b32d2e; }
             .dt-migration-error-scroll { max-height: 200px; overflow-y: auto; padding: 8px; background: #fff; border: 1px solid #c3c4c7; border-radius: 4px; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
+            .dt-migration-past-jobs { margin-top: 8px; }
+            .dt-migration-past-jobs .dt-migration-job-pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+            .dt-migration-past-jobs .dt-migration-job-pill--success { background: #00a32a; color: #fff; }
+            .dt-migration-past-jobs .dt-migration-job-pill--failed { background: #d63638; color: #fff; }
+            .dt-migration-past-jobs .dt-migration-job-pill--neutral { background: #dcdcde; color: #1d2327; }
         ';
     }
 
@@ -263,6 +276,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             $code   = wp_remote_retrieve_response_code( $records_res );
             $rbody  = json_decode( (string) wp_remote_retrieve_body( $records_res ), true );
             $recs   = $rbody['records'] ?? [];
+            $pum    = $rbody['post_user_meta'] ?? [];
             $total  = (int) ( $rbody['total'] ?? 0 );
             $has_more = ! empty( $rbody['has_more'] );
 
@@ -273,6 +287,21 @@ class Disciple_Tools_Migration_Import_Ajax {
                     'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
+            }
+
+            // Apply per-user private meta returned alongside this batch.
+            $batch_post_ids = [];
+            foreach ( $recs as $rec ) {
+                if ( isset( $rec['ID'] ) ) {
+                    $batch_post_ids[] = (int) $rec['ID'];
+                }
+            }
+            $pum_result = Disciple_Tools_Migration_Import_Engine::import_post_user_meta_for_posts(
+                is_array( $pum ) ? $pum : [],
+                $batch_post_ids
+            );
+            if ( ! empty( $pum_result['errors'] ) ) {
+                $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $pum_result['errors'] );
             }
 
             wp_send_json_success( [
@@ -292,7 +321,61 @@ class Disciple_Tools_Migration_Import_Ajax {
     }
 
     /**
-     * Handles import batch requests for file mode (payload in transient).
+     * Resolves the file-mode job payload for the current user, or returns an error structure.
+     * Callers must verify the AJAX nonce (handle_import_batch, handle_preflight) before this runs.
+     *
+     * @param int $user_id Current user.
+     * @return array{ payload: array, job_id: string }|array{ error: string }
+     */
+    private function resolve_file_job_payload( int $user_id ) {
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
+        if ( $job_id === '' ) {
+            return [
+                'error' => __( 'No file migration job was specified. Use Upload & Preview or Retry from the job list.', 'disciple-tools-migration' ),
+            ];
+        }
+        $payload = Disciple_Tools_Migration_File_Job_Store::get_payload( $user_id, $job_id );
+        if ( $payload === null || ! Disciple_Tools_Migration_File_Job_Store::is_valid_migration_payload( $payload ) ) {
+            return [
+                'error' => __( 'That migration file is not available. Upload the JSON again or use Retry on a job that still has a stored file.', 'disciple-tools-migration' ),
+            ];
+        }
+        return [ 'payload' => $payload, 'job_id' => $job_id ];
+    }
+
+    /**
+     * Marks a job as running on the first import step when appropriate.
+     *
+     * @param int    $user_id
+     * @param string $job_id
+     * @param string $step
+     * @param int    $offset
+     * @param bool   $init_records
+     * @return void
+     */
+    private function maybe_mark_file_job_running( int $user_id, string $job_id, string $step, int $offset, bool $init_records ) : void {
+        $meta = Disciple_Tools_Migration_File_Job_Store::get_job_meta( $user_id, $job_id );
+        if ( $meta === null ) {
+            return;
+        }
+        $st = (string) ( $meta['status'] ?? '' );
+        if ( $st === Disciple_Tools_Migration_File_Job_Store::STATUS_RUNNING ) {
+            return;
+        }
+        if ( ! in_array( $st, [ Disciple_Tools_Migration_File_Job_Store::STATUS_READY, Disciple_Tools_Migration_File_Job_Store::STATUS_FAILED, Disciple_Tools_Migration_File_Job_Store::STATUS_CANCELLED ], true ) ) {
+            return;
+        }
+        $is_first = ( $step === 'settings' ) || ( $step === 'records' && $offset === 0 && $init_records );
+        if ( ! $is_first ) {
+            return;
+        }
+        Disciple_Tools_Migration_File_Job_Store::set_status( $user_id, $job_id, Disciple_Tools_Migration_File_Job_Store::STATUS_RUNNING );
+    }
+
+    /**
+     * Handles import batch requests for file mode (payload stored in options per job).
      *
      * @param string $step   'settings' or 'records'
      * @param array  $settings Migration settings.
@@ -301,15 +384,25 @@ class Disciple_Tools_Migration_Import_Ajax {
         // Nonce verified in handle_import_batch() via check_ajax_referer( 'dt_migration_import', 'nonce' ).
         // phpcs:disable WordPress.Security.NonceVerification.Missing
 
-        $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
-        $payload       = get_transient( $transient_key );
+        $user_id  = get_current_user_id();
+        $resolved = $this->resolve_file_job_payload( $user_id );
+        if ( isset( $resolved['error'] ) ) {
+            wp_send_json_error( [ 'message' => $resolved['error'] ] );
+        }
+        $payload = $resolved['payload'];
+        $job_id  = $resolved['job_id'];
+
+        $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : '';
+        $offset    = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
+        $init_q    = ! empty( $_POST['init_records_import'] );
+        $this->maybe_mark_file_job_running( $user_id, $job_id, $step, 'records' === $step ? $offset : 0, 'records' === $step && $init_q );
 
         $export_block = ( is_array( $payload ) && isset( $payload['export'] ) && is_array( $payload['export'] ) ) ? $payload['export'] : [];
         $has_dt       = ! empty( $export_block['dt_settings'] );
         $has_users    = array_key_exists( 'system_users', $export_block ) && is_array( $export_block['system_users'] );
         if ( ! is_array( $payload ) || ( ! $has_dt && ! $has_users ) ) {
             wp_send_json_error( [
-                'message' => __( 'No migration file loaded or payload expired. Please upload the file again.', 'disciple-tools-migration' ),
+                'message' => __( 'That migration file is not available. Upload the JSON again or use Retry on a job that still has a stored file.', 'disciple-tools-migration' ),
             ] );
         }
 
@@ -338,10 +431,7 @@ class Disciple_Tools_Migration_Import_Ajax {
         }
 
         if ( $step === 'records' ) {
-            $post_type = isset( $_POST['post_type'] ) ? sanitize_key( wp_unslash( $_POST['post_type'] ) ) : '';
-            $offset    = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
-            $limit     = 50;
-            $init_q    = ! empty( $_POST['init_records_import'] );
+            $limit = 50;
 
             if ( empty( $post_type ) ) {
                 wp_send_json_error( [ 'message' => __( 'Post type required.', 'disciple-tools-migration' ) ] );
@@ -378,6 +468,22 @@ class Disciple_Tools_Migration_Import_Ajax {
                     'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
+            }
+
+            // Apply per-user private meta (dt_post_user_meta) for the post IDs in this slice.
+            $slice_post_ids = [];
+            foreach ( $slice as $rec ) {
+                if ( isset( $rec['ID'] ) ) {
+                    $slice_post_ids[] = (int) $rec['ID'];
+                }
+            }
+            $pum_rows   = $payload['post_user_meta'][ $post_type ] ?? [];
+            $pum_result = Disciple_Tools_Migration_Import_Engine::import_post_user_meta_for_posts(
+                is_array( $pum_rows ) ? $pum_rows : [],
+                $slice_post_ids
+            );
+            if ( ! empty( $pum_result['errors'] ) ) {
+                $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $pum_result['errors'] );
             }
 
             wp_send_json_success( [
@@ -451,14 +557,18 @@ class Disciple_Tools_Migration_Import_Ajax {
      * @return array|array{ error: string }
      */
     private function preflight_file_payload( array $settings_map, array $records_selected_in ) : array {
-        $transient_key = 'dt_migration_file_payload_' . get_current_user_id();
-        $payload       = get_transient( $transient_key );
+        $user_id  = get_current_user_id();
+        $resolved = $this->resolve_file_job_payload( $user_id );
+        if ( isset( $resolved['error'] ) ) {
+            return [ 'error' => $resolved['error'] ];
+        }
+        $payload = $resolved['payload'];
 
         $export_block = ( is_array( $payload ) && isset( $payload['export'] ) && is_array( $payload['export'] ) ) ? $payload['export'] : [];
         $has_dt       = ! empty( $export_block['dt_settings'] );
         $has_users    = array_key_exists( 'system_users', $export_block ) && is_array( $export_block['system_users'] );
         if ( ! is_array( $payload ) || ( ! $has_dt && ! $has_users ) ) {
-            return [ 'error' => __( 'No migration file loaded or payload expired. Please upload the file again.', 'disciple-tools-migration' ) ];
+            return [ 'error' => __( 'That migration file is not available. Upload the JSON again or use Retry on a job that still has a stored file.', 'disciple-tools-migration' ) ];
         }
 
         $records_all = isset( $payload['records'] ) && is_array( $payload['records'] ) ? $payload['records'] : [];
@@ -592,5 +702,97 @@ class Disciple_Tools_Migration_Import_Ajax {
             'warnings' => $analysis['warnings'],
             'info'     => $info_out,
         ];
+    }
+
+    /**
+     * AJAX: remove a file migration job and its stored payload.
+     *
+     * @return void
+     */
+    public function handle_file_job_delete() : void {
+        check_ajax_referer( 'dt_migration_import', 'nonce' );
+
+        if ( ! current_user_can( 'manage_dt' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
+        }
+
+        $posted = filter_input( INPUT_POST, 'job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
+        if ( $job_id === '' ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
+        }
+
+        Disciple_Tools_Migration_File_Job_Store::delete_job( get_current_user_id(), $job_id );
+        wp_send_json_success( [ 'deleted' => true ] );
+    }
+
+    /**
+     * AJAX: mark a file job successful and clear stored JSON.
+     *
+     * @return void
+     */
+    public function handle_file_job_complete() : void {
+        check_ajax_referer( 'dt_migration_import', 'nonce' );
+
+        if ( ! current_user_can( 'manage_dt' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
+        }
+
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
+        if ( $job_id === '' ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
+        }
+
+        Disciple_Tools_Migration_File_Job_Store::mark_success_and_clear_payload( get_current_user_id(), $job_id );
+        wp_send_json_success( [ 'ok' => true ] );
+    }
+
+    /**
+     * AJAX: mark a file job as failed (payload kept for retry).
+     *
+     * @return void
+     */
+    public function handle_file_job_failed() : void {
+        check_ajax_referer( 'dt_migration_import', 'nonce' );
+
+        if ( ! current_user_can( 'manage_dt' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
+        }
+
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
+        if ( $job_id === '' ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
+        }
+
+        Disciple_Tools_Migration_File_Job_Store::set_status( get_current_user_id(), $job_id, Disciple_Tools_Migration_File_Job_Store::STATUS_FAILED );
+        wp_send_json_success( [ 'ok' => true ] );
+    }
+
+    /**
+     * AJAX: mark a file job as user-cancelled.
+     *
+     * @return void
+     */
+    public function handle_file_job_cancelled() : void {
+        check_ajax_referer( 'dt_migration_import', 'nonce' );
+
+        if ( ! current_user_can( 'manage_dt' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Insufficient permissions.', 'disciple-tools-migration' ) ] );
+        }
+
+        $posted = filter_input( INPUT_POST, 'file_job_id' );
+        $raw    = ( is_string( $posted ) && $posted !== '' ) ? sanitize_text_field( wp_unslash( $posted ) ) : '';
+        $job_id = Disciple_Tools_Migration_File_Job_Store::sanitize_job_id( $raw );
+        if ( $job_id === '' ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid job.', 'disciple-tools-migration' ) ] );
+        }
+
+        Disciple_Tools_Migration_File_Job_Store::set_status( get_current_user_id(), $job_id, Disciple_Tools_Migration_File_Job_Store::STATUS_CANCELLED );
+        wp_send_json_success( [ 'ok' => true ] );
     }
 }

@@ -24,6 +24,8 @@
     let completedSteps = 0;
     let activeImportChannel = 'api';
     let isSlimConfirmMode = false;
+    /** File job UUID for the current or last-started file import (from data-file-job-id on the file section). */
+    let fileJobIdForRun = '';
     /** First records batch of this run sends init_records_import (clears stale deferred queue if settings step was skipped). */
     let sentRecordsImportInit = false;
     /** Per-record or connection-pass issues logged while import continues. */
@@ -73,6 +75,16 @@
     function beginImportFlow( $section ) {
         const fromBtn = $section.find( '.dt-migration-start-import' ).first().data( 'importChannel' );
         activeImportChannel = fromBtn === 'file' ? 'file' : 'api';
+        if ( activeImportChannel === 'file' ) {
+            const jid = String( $section.attr( 'data-file-job-id' ) || '' ).trim();
+            if ( ! jid ) {
+                window.alert( 'No file migration job is active. Use Upload & Preview or Retry from the job list first.' );
+                return;
+            }
+            fileJobIdForRun = jid;
+        } else {
+            fileJobIdForRun = '';
+        }
 
         const settings = getSelectedSettings( $section );
         const records = getSelectedRecords( $section );
@@ -89,6 +101,43 @@
         completedSteps = 0;
         sentRecordsImportInit = false;
         startNextPhase();
+    }
+
+    function appendFileJobId( data ) {
+        if ( activeImportChannel === 'file' && fileJobIdForRun ) {
+            data.file_job_id = fileJobIdForRun;
+        }
+        return data;
+    }
+
+    function notifyFileJobCompleteIfNeeded() {
+        if ( activeImportChannel === 'file' && fileJobIdForRun && typeof dtMigrationImport !== 'undefined' ) {
+            $.post( dtMigrationImport.ajaxUrl, {
+                action: 'dt_migration_file_job_complete',
+                nonce: dtMigrationImport.nonce,
+                file_job_id: fileJobIdForRun
+            } );
+        }
+    }
+
+    function notifyFileJobFailedIfNeeded() {
+        if ( activeImportChannel === 'file' && fileJobIdForRun && typeof dtMigrationImport !== 'undefined' ) {
+            $.post( dtMigrationImport.ajaxUrl, {
+                action: 'dt_migration_file_job_failed',
+                nonce: dtMigrationImport.nonce,
+                file_job_id: fileJobIdForRun
+            } );
+        }
+    }
+
+    function notifyFileJobCancelledIfNeeded() {
+        if ( activeImportChannel === 'file' && fileJobIdForRun && typeof dtMigrationImport !== 'undefined' ) {
+            $.post( dtMigrationImport.ajaxUrl, {
+                action: 'dt_migration_file_job_cancelled',
+                nonce: dtMigrationImport.nonce,
+                file_job_id: fileJobIdForRun
+            } );
+        }
     }
 
     function runPreflightRequest( $section ) {
@@ -122,6 +171,17 @@
             settings_selected: settings,
             records_selected: recordPts
         };
+        if ( channel === 'file' ) {
+            const $fileSec = $section && $section.length && $section.is( '.dt-migration-import-section[data-import-channel="file"]' ) ? $section : $section.closest( '.dt-migration-import-section[data-import-channel="file"]' );
+            const fid = $fileSec && $fileSec.length ? String( $fileSec.attr( 'data-file-job-id' ) || '' ).trim() : '';
+            if ( ! fid ) {
+                window.alert( t( 'preflightFileJobMissing', 'No file migration job is active. Use Upload & Preview or Retry from the job list first.' ) );
+                $pfStatus.prop( 'hidden', true );
+                $pfModal.hide();
+                return;
+            }
+            payload.file_job_id = fid;
+        }
 
         $.post( dtMigrationImport.ajaxUrl, payload ).done( function( r ) {
             $pfStatus.prop( 'hidden', true );
@@ -298,13 +358,13 @@
             $currentPhase.text( phase.label + '...' );
 
             if ( phase.type === 'settings' ) {
-                $.post( dtMigrationImport.ajaxUrl, {
+                $.post( dtMigrationImport.ajaxUrl, appendFileJobId( {
                     action: 'dt_migration_import_batch',
                     nonce: dtMigrationImport.nonce,
                     import_channel: activeImportChannel,
                     step: 'settings',
                     settings_selected: phase.settings
-                } ).done( function( r ) {
+                } ) ).done( function( r ) {
                     if ( r.success ) {
                         resolve( r.data );
                     } else {
@@ -327,12 +387,12 @@
                         return;
                     }
                     $currentPhase.text( 'Applying connection fields…' );
-                    $.post( dtMigrationImport.ajaxUrl, {
+                    $.post( dtMigrationImport.ajaxUrl, appendFileJobId( {
                         action: 'dt_migration_import_batch',
                         nonce: dtMigrationImport.nonce,
                         import_channel: activeImportChannel,
                         step: 'apply_deferred_connections'
-                    } ).done( function( r2 ) {
+                    } ) ).done( function( r2 ) {
                         if ( r2.success ) {
                             const d2 = r2.data || {};
                             appendImportLogLines( d2.connection_errors );
@@ -362,7 +422,7 @@
                         payload.init_records_import = '1';
                         sentRecordsImportInit = true;
                     }
-                    $.post( dtMigrationImport.ajaxUrl, payload ).done( function( r ) {
+                    $.post( dtMigrationImport.ajaxUrl, appendFileJobId( payload ) ).done( function( r ) {
                         if ( r.success ) {
                             const d = r.data;
                             appendImportLogLines( d.record_errors );
@@ -391,6 +451,7 @@
 
     function startNextPhase() {
         if ( currentPhaseIndex >= phases.length ) {
+            notifyFileJobCompleteIfNeeded();
             setImportSpinner( false );
             setProgress( 100 );
             $currentPhase.text(
@@ -425,6 +486,7 @@
         markStepActive( currentPhaseIndex );
         runPhase( phase ).then( function( result ) {
             if ( result && result.cancelled ) {
+                notifyFileJobCancelledIfNeeded();
                 setImportSpinner( false );
                 $currentPhase.text( 'Import cancelled.' );
                 $cancelImport.hide();
@@ -435,6 +497,7 @@
             currentPhaseIndex++;
             startNextPhase();
         } ).catch( function( err ) {
+            notifyFileJobFailedIfNeeded();
             setImportSpinner( false );
             $currentPhase.text( 'Import failed.' );
             showError( err );
@@ -479,6 +542,36 @@
         $pfStatus = $( '.dt-migration-preflight-status' );
         $pfProceed = $( '.dt-migration-preflight-proceed' );
         $pfClose = $( '.dt-migration-preflight-close' );
+
+        // Recent-jobs Delete works on any page with the jobs table, even when no
+        // upload preview is visible. Register before the modal guard below.
+        $( document ).on( 'click', '.dt-migration-file-job-delete', function( e ) {
+            e.preventDefault();
+            const $btn = $( this );
+            const id = $btn.data( 'job-id' );
+            if ( ! id || ! window.confirm( t( 'deleteFileJobConfirm', 'Delete this file migration job and its stored data?' ) ) ) {
+                return;
+            }
+            if ( typeof dtMigrationImport === 'undefined' ) {
+                return;
+            }
+            $btn.prop( 'disabled', true );
+            $.post( dtMigrationImport.ajaxUrl, {
+                action: 'dt_migration_file_job_delete',
+                nonce: dtMigrationImport.nonce,
+                job_id: id
+            } ).done( function( r ) {
+                if ( r.success ) {
+                    window.location.reload();
+                    return;
+                }
+                window.alert( ( r.data && r.data.message ) ? r.data.message : t( 'deleteFileJobFailed', 'Could not delete the job.' ) );
+                $btn.prop( 'disabled', false );
+            } ).fail( function() {
+                window.alert( t( 'deleteFileJobFailed', 'Could not delete the job.' ) );
+                $btn.prop( 'disabled', false );
+            } );
+        } );
 
         if ( ! $modal.length || ! $( '.dt-migration-start-import' ).length ) {
             return;
@@ -543,6 +636,7 @@
             const checked = $( this ).prop( 'checked' );
             $section.find( '.dt-migration-record-checkbox' ).prop( 'checked', checked );
         } );
+
     }
 
     $( document ).ready( init );

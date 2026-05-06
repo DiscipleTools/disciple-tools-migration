@@ -160,8 +160,17 @@ class Disciple_Tools_Migration_System_Users {
                 $out['map'][ (string) $old_id ] = (int) $existing->ID;
                 ++$out['mapped_existing'];
 
+                $norm_roles = self::normalized_roles_from_row( $row );
+
+                if ( is_multisite() && ! is_user_member_of_blog( $existing->ID, get_current_blog_id() ) ) {
+                    $add_err = self::add_existing_user_to_current_blog( $existing->ID, $norm_roles );
+                    if ( $add_err !== null ) {
+                        return array_merge( $out, [ 'error' => $add_err ] );
+                    }
+                }
+
                 if ( $is_src_admin ) {
-                    $roles_err = self::assign_roles_to_wp_user( $existing->ID, self::normalized_roles_from_row( $row ) );
+                    $roles_err = self::assign_roles_to_wp_user( $existing->ID, $norm_roles );
                     if ( $roles_err !== null ) {
                         return array_merge( $out, [ 'error' => $roles_err ] );
                     }
@@ -344,6 +353,63 @@ class Disciple_Tools_Migration_System_Users {
                 $default_role = 'subscriber';
             }
             $user->set_role( $default_role );
+        }
+
+        return null;
+    }
+
+    /**
+     * Adds an existing network user to the current subsite using their source roles.
+     *
+     * Multisite-only. Skips when user is already a member of the current blog.
+     * Uses add_user_to_blog() for the primary role so the standard hooks fire,
+     * then adds any extra roles via WP_User::add_role(). Falls back to the site's
+     * default role when the export carries no usable role.
+     *
+     * @param int      $user_id Target site user ID.
+     * @param string[] $roles   Sanitized role slugs from the export row.
+     * @return string|null Error message, or null on success / no-op.
+     */
+    private static function add_existing_user_to_current_blog( int $user_id, array $roles ) : ?string {
+        $roles = array_values( array_filter( array_map( 'sanitize_key', $roles ) ) );
+
+        if ( in_array( 'administrator', $roles, true ) && ! current_user_can( 'promote_users' ) ) {
+            return __( 'You do not have permission to assign the administrator role.', 'disciple-tools-migration' );
+        }
+
+        $wp_roles = wp_roles();
+        foreach ( $roles as $slug ) {
+            if ( ! $wp_roles->is_role( $slug ) ) {
+                return sprintf(
+                    /* translators: %s: role slug from export */
+                    __( 'Unknown or invalid role in export: %s', 'disciple-tools-migration' ),
+                    $slug
+                );
+            }
+        }
+
+        if ( empty( $roles ) ) {
+            $default_role = sanitize_key( (string) get_option( 'default_role', 'subscriber' ) );
+            if ( ! $wp_roles->is_role( $default_role ) ) {
+                $default_role = 'subscriber';
+            }
+            $primary = $default_role;
+            $extras  = [];
+        } else {
+            $primary = array_shift( $roles );
+            $extras  = $roles;
+        }
+
+        $result = add_user_to_blog( get_current_blog_id(), $user_id, $primary );
+        if ( is_wp_error( $result ) ) {
+            return $result->get_error_message();
+        }
+
+        if ( ! empty( $extras ) ) {
+            $user = new WP_User( $user_id );
+            foreach ( $extras as $extra_role ) {
+                $user->add_role( $extra_role );
+            }
         }
 
         return null;
