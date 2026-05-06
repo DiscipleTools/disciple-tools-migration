@@ -276,6 +276,7 @@ class Disciple_Tools_Migration_Import_Ajax {
             $code   = wp_remote_retrieve_response_code( $records_res );
             $rbody  = json_decode( (string) wp_remote_retrieve_body( $records_res ), true );
             $recs   = $rbody['records'] ?? [];
+            $pum    = $rbody['post_user_meta'] ?? [];
             $total  = (int) ( $rbody['total'] ?? 0 );
             $has_more = ! empty( $rbody['has_more'] );
 
@@ -286,6 +287,21 @@ class Disciple_Tools_Migration_Import_Ajax {
                     'message'  => implode( "\n", $batch_result['errors'] ),
                     'imported' => $batch_result['imported'] ?? 0,
                 ] );
+            }
+
+            // Apply per-user private meta returned alongside this batch.
+            $batch_post_ids = [];
+            foreach ( $recs as $rec ) {
+                if ( isset( $rec['ID'] ) ) {
+                    $batch_post_ids[] = (int) $rec['ID'];
+                }
+            }
+            $pum_result = Disciple_Tools_Migration_Import_Engine::import_post_user_meta_for_posts(
+                is_array( $pum ) ? $pum : [],
+                $batch_post_ids
+            );
+            if ( ! empty( $pum_result['errors'] ) ) {
+                $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $pum_result['errors'] );
             }
 
             wp_send_json_success( [
