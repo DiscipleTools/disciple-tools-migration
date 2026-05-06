@@ -5,7 +5,7 @@
  * Description: Export and import Disciple.Tools settings and records via REST API or downloadable JSON.
  * Text Domain: disciple-tools-migration
  * Domain Path: /languages
- * Version: 1.0.0
+ * Version: 0.1
  * Author URI: https://github.com/DiscipleTools
  * GitHub Plugin URI: https://github.com/DiscipleTools/disciple-tools-migration
  * Requires at least: 4.7.0
