@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Disciple_Tools_Migration_Export_File {
 
-    const EXPORT_VERSION = '1.0';
+    const EXPORT_VERSION = '1.1';
 
     /**
      * Builds a full export payload (settings + records) for file download.
@@ -37,9 +37,11 @@ class Disciple_Tools_Migration_Export_File {
             $export_block['system_users'] = Disciple_Tools_Migration_System_Users::build_export_payload();
         }
 
-        $records         = [];
-        $post_user_meta  = [];
-        $allowed_records = $allowed['records'] ?? [];
+        $records          = [];
+        $post_user_meta   = [];
+        $activity_log     = [];
+        $allowed_records  = $allowed['records'] ?? [];
+        $export_activity  = ! empty( $settings['include_activity_log'] );
         if ( ! empty( $allowed_records ) && is_array( $allowed_records ) ) {
             foreach ( $allowed_records as $post_type => $enabled ) {
                 if ( ! $enabled ) {
@@ -53,6 +55,9 @@ class Disciple_Tools_Migration_Export_File {
                 $ids                       = self::get_record_ids( $post_type, $limit, $min_id, $max_id );
                 $records[ $post_type ]     = self::fetch_records_for_ids( $post_type, $ids );
                 $post_user_meta[ $post_type ] = self::fetch_post_user_meta( $ids );
+                if ( $export_activity ) {
+                    $activity_log[ $post_type ] = self::fetch_activity_log_for_posts( $post_type, $ids );
+                }
             }
         }
 
@@ -61,13 +66,15 @@ class Disciple_Tools_Migration_Export_File {
             'type'     => 'file',
             'site_meta' => $site_meta,
             'settings' => [
-                'enabled'       => ! empty( $settings['enabled'] ),
-                'mode'          => 'file',
-                'allowed_items' => $allowed,
+                'enabled'                => ! empty( $settings['enabled'] ),
+                'include_activity_log'  => ! empty( $settings['include_activity_log'] ),
+                'mode'                  => 'file',
+                'allowed_items'         => $allowed,
             ],
             'export'         => $export_block,
             'records'        => $records,
             'post_user_meta' => $post_user_meta,
+            'activity_log'   => $activity_log,
         ];
     }
 
@@ -163,6 +170,65 @@ class Disciple_Tools_Migration_Export_File {
                     'meta_value' => $row['meta_value'],
                     'date'       => $row['date'],
                     'category'   => $row['category'],
+                ];
+            },
+            $rows
+        );
+    }
+
+    /**
+     * Dumps wp_dt_activity_log rows for the given post type and post IDs (histid omitted).
+     *
+     * @param string $post_type Post type slug (object_type in the log).
+     * @param int[]  $post_ids
+     * @return array<int, array<string, mixed>>
+     */
+    public static function fetch_activity_log_for_posts( string $post_type, array $post_ids ) : array {
+        if ( '' === $post_type || empty( $post_ids ) ) {
+            return [];
+        }
+        global $wpdb;
+        $table = isset( $wpdb->dt_activity_log ) ? $wpdb->dt_activity_log : $wpdb->prefix . 'dt_activity_log';
+
+        $post_ids = array_values( array_map( 'intval', $post_ids ) );
+        $placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT user_caps, action, object_type, object_subtype, object_name, object_id, user_id, hist_ip, hist_time, object_note, meta_id, meta_key, meta_value, meta_parent, old_value, field_type
+                 FROM {$table}
+                 WHERE object_type = %s AND object_id IN ( $placeholders )
+                 ORDER BY hist_time ASC, histid ASC",
+                array_merge( [ $post_type ], $post_ids )
+            ),
+            ARRAY_A
+        );
+        // phpcs:enable
+
+        if ( ! is_array( $rows ) ) {
+            return [];
+        }
+
+        return array_map(
+            static function ( array $row ) : array {
+                return [
+                    'user_caps'      => (string) ( $row['user_caps'] ?? 'guest' ),
+                    'action'         => (string) ( $row['action'] ?? '' ),
+                    'object_type'    => (string) ( $row['object_type'] ?? '' ),
+                    'object_subtype' => (string) ( $row['object_subtype'] ?? '' ),
+                    'object_name'    => (string) ( $row['object_name'] ?? '' ),
+                    'object_id'      => (int) ( $row['object_id'] ?? 0 ),
+                    'user_id'        => (int) ( $row['user_id'] ?? 0 ),
+                    'hist_ip'        => isset( $row['hist_ip'] ) ? (string) $row['hist_ip'] : '127.0.0.1',
+                    'hist_time'      => (int) ( $row['hist_time'] ?? 0 ),
+                    'object_note'    => (string) ( $row['object_note'] ?? '' ),
+                    'meta_id'        => (int) ( $row['meta_id'] ?? 0 ),
+                    'meta_key'       => (string) ( $row['meta_key'] ?? '' ),
+                    'meta_value'     => (string) ( $row['meta_value'] ?? '' ),
+                    'meta_parent'    => (int) ( $row['meta_parent'] ?? 0 ),
+                    'old_value'      => (string) ( $row['old_value'] ?? '' ),
+                    'field_type'     => (string) ( $row['field_type'] ?? '' ),
                 ];
             },
             $rows

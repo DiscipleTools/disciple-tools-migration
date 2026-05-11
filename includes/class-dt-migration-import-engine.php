@@ -815,13 +815,6 @@ class Disciple_Tools_Migration_Import_Engine {
     }
 
     /**
-     * Deletes all posts of a given post type.
-     *
-     * @param string $post_type
-     *
-     * @return int Number deleted, or -1 on error.
-     */
-    /**
      * Imports per-user private meta (dt_post_user_meta) for a slice of post IDs.
      *
      * Replace semantics: deletes all existing dt_post_user_meta rows for the in-scope
@@ -898,6 +891,110 @@ class Disciple_Tools_Migration_Import_Engine {
         return $result;
     }
 
+    /**
+     * Imports activity log rows for a slice of post IDs (wp_dt_activity_log).
+     *
+     * Replace semantics: deletes existing log rows for the given object_type and in-scope
+     * object_ids, then inserts export rows with user_id remapped when greater than zero and new histid.
+     * user_caps and hist_ip are taken from the export (historical record).
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @param int[]                           $post_ids_in_scope
+     * @param string                          $post_type Object type stored in the log.
+     * @return array{ inserted: int, errors: string[] }
+     */
+    public static function import_activity_log_for_posts( array $rows, array $post_ids_in_scope, string $post_type ) : array {
+        $result = [ 'inserted' => 0, 'errors' => [] ];
+
+        if ( '' === $post_type ) {
+            return $result;
+        }
+
+        $post_ids = array_values( array_unique( array_filter( array_map( 'intval', $post_ids_in_scope ) ) ) );
+        if ( empty( $post_ids ) ) {
+            return $result;
+        }
+
+        global $wpdb;
+        $table = isset( $wpdb->dt_activity_log ) ? $wpdb->dt_activity_log : $wpdb->prefix . 'dt_activity_log';
+        $placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$table} WHERE object_type = %s AND object_id IN ( $placeholders )",
+                array_merge( [ $post_type ], $post_ids )
+            )
+        );
+        // phpcs:enable
+
+        if ( empty( $rows ) ) {
+            return $result;
+        }
+
+        $scope = array_flip( $post_ids );
+        foreach ( $rows as $row ) {
+            if ( ! is_array( $row ) ) {
+                continue;
+            }
+            $pid = isset( $row['object_id'] ) ? (int) $row['object_id'] : 0;
+            if ( $pid <= 0 || ! isset( $scope[ $pid ] ) ) {
+                continue;
+            }
+            $obj_type = isset( $row['object_type'] ) ? (string) $row['object_type'] : '';
+            if ( $obj_type !== $post_type ) {
+                continue;
+            }
+
+            $source_uid = isset( $row['user_id'] ) ? (int) $row['user_id'] : 0;
+            $target_uid = 0;
+            if ( $source_uid > 0 ) {
+                $target_uid = Disciple_Tools_Migration_System_Users::remap_user_id( $source_uid );
+                if ( $target_uid <= 0 || ! get_user_by( 'id', $target_uid ) ) {
+                    $result['errors'][] = sprintf(
+                        /* translators: 1: post ID, 2: source user ID */
+                        __( 'Skipped activity log row (post #%1$d): no target user for source user %2$d.', 'disciple-tools-migration' ),
+                        $pid,
+                        $source_uid
+                    );
+                    continue;
+                }
+            }
+
+            $ok = $wpdb->insert(
+                $table,
+                [
+                    'user_caps'      => (string) ( $row['user_caps'] ?? 'guest' ),
+                    'action'         => (string) ( $row['action'] ?? '' ),
+                    'object_type'    => $post_type,
+                    'object_subtype' => (string) ( $row['object_subtype'] ?? '' ),
+                    'object_name'    => (string) ( $row['object_name'] ?? '' ),
+                    'object_id'      => $pid,
+                    'user_id'        => $target_uid,
+                    'hist_ip'        => isset( $row['hist_ip'] ) ? (string) $row['hist_ip'] : '127.0.0.1',
+                    'hist_time'      => isset( $row['hist_time'] ) ? (int) $row['hist_time'] : 0,
+                    'object_note'    => (string) ( $row['object_note'] ?? '' ),
+                    'meta_id'        => isset( $row['meta_id'] ) ? (int) $row['meta_id'] : 0,
+                    'meta_key'       => (string) ( $row['meta_key'] ?? '' ),
+                    'meta_value'     => (string) ( $row['meta_value'] ?? '' ),
+                    'meta_parent'    => isset( $row['meta_parent'] ) ? (int) $row['meta_parent'] : 0,
+                    'old_value'      => (string) ( $row['old_value'] ?? '' ),
+                    'field_type'     => (string) ( $row['field_type'] ?? '' ),
+                ]
+            );
+            if ( $ok ) {
+                ++$result['inserted'];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Deletes all posts of a given post type.
+     *
+     * @param string $post_type Post type slug.
+     * @return int Number deleted.
+     */
     public static function delete_posts_by_type( string $post_type ) : int {
         $query = new WP_Query(
             [

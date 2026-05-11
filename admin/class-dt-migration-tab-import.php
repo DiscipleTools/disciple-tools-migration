@@ -50,6 +50,13 @@ class Disciple_Tools_Migration_Tab_Import {
     private $import_preview_user_count = 0;
 
     /**
+     * Whether the previewed export includes activity log rows (source package / Server A).
+     *
+     * @var bool
+     */
+    private $import_preview_export_include_activity_log = false;
+
+    /**
      * Which import UI produced the current preview: 'api' or 'file'.
      *
      * @var string|null
@@ -322,6 +329,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <td><?php echo esc_html( $row['notes'] ); ?></td>
                                         </tr>
                                     <?php endforeach; ?>
+                                    <?php $this->render_import_preview_activity_settings_row(); ?>
                                     </tbody>
                                 </table>
 
@@ -336,6 +344,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                         <th><?php esc_html_e( 'Tiles', 'disciple-tools-migration' ); ?></th>
                                         <th><?php esc_html_e( 'Fields', 'disciple-tools-migration' ); ?></th>
                                         <th><?php esc_html_e( 'Records', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Activity log', 'disciple-tools-migration' ); ?></th>
                                     </tr>
                                     </thead>
                                     <tbody>
@@ -360,12 +369,27 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <td><?php echo isset( $summary['tiles'] ) ? intval( $summary['tiles'] ) : 0; ?></td>
                                             <td><?php echo isset( $summary['fields'] ) ? intval( $summary['fields'] ) : 0; ?></td>
                                             <td><?php echo esc_html( (string) (int) $record_count ); ?></td>
+                                            <td>
+                                                <?php
+                                                if ( $this->import_preview_export_include_activity_log ) {
+                                                    $ac = isset( $record_data['activity_log_count'] ) ? (int) $record_data['activity_log_count'] : 0;
+                                                    echo esc_html( number_format_i18n( $ac ) );
+                                                } else {
+                                                    echo '<span aria-hidden="true">&mdash;</span>';
+                                                }
+                                                ?>
+                                            </td>
                                         </tr>
                                         <?php
                                     }
                                     ?>
                                     </tbody>
                                 </table>
+                                <?php if ( $this->import_preview_export_include_activity_log && empty( $settings['include_activity_log'] ) ) : ?>
+                                    <p class="description" style="margin-top: 8px;">
+                                        <?php esc_html_e( 'Activity log is disabled on this site (Migration → Settings), so historical entries will not be restored during import until you enable that option.', 'disciple-tools-migration' ); ?>
+                                    </p>
+                                <?php endif; ?>
 
                                 <p style="margin-top: 16px;">
                                     <button type="button" class="button dt-migration-run-preflight" data-import-channel="api">
@@ -458,6 +482,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <td><?php echo esc_html( $row['notes'] ); ?></td>
                                         </tr>
                                     <?php endforeach; ?>
+                                    <?php $this->render_import_preview_activity_settings_row(); ?>
                                     </tbody>
                                 </table>
                                 <table class="widefat striped dt-migration-records-table">
@@ -468,6 +493,7 @@ class Disciple_Tools_Migration_Tab_Import {
                                         <th><?php esc_html_e( 'Tiles', 'disciple-tools-migration' ); ?></th>
                                         <th><?php esc_html_e( 'Fields', 'disciple-tools-migration' ); ?></th>
                                         <th><?php esc_html_e( 'Records', 'disciple-tools-migration' ); ?></th>
+                                        <th><?php esc_html_e( 'Activity log', 'disciple-tools-migration' ); ?></th>
                                     </tr>
                                     </thead>
                                     <tbody>
@@ -486,10 +512,26 @@ class Disciple_Tools_Migration_Tab_Import {
                                             <td><?php echo isset( $summary['tiles'] ) ? intval( $summary['tiles'] ) : 0; ?></td>
                                             <td><?php echo isset( $summary['fields'] ) ? intval( $summary['fields'] ) : 0; ?></td>
                                             <td><?php echo esc_html( (string) (int) $record_count ); ?></td>
+                                            <td>
+                                                <?php
+                                                if ( $this->import_preview_export_include_activity_log ) {
+                                                    $ac = isset( $record_data['activity_log_count'] ) ? (int) $record_data['activity_log_count'] : 0;
+                                                    echo esc_html( number_format_i18n( $ac ) );
+                                                } else {
+                                                    echo '<span aria-hidden="true">&mdash;</span>';
+                                                }
+                                                ?>
+                                            </td>
                                         </tr>
                                     <?php } ?>
                                     </tbody>
                                 </table>
+                                <?php if ( $this->import_preview_export_include_activity_log && empty( $settings['include_activity_log'] ) ) : ?>
+                                    <p class="description" style="margin-top: 8px;">
+                                        <?php esc_html_e( 'Activity log is disabled on this site (Migration → Settings), so historical entries will not be restored during import until you enable that option.', 'disciple-tools-migration' ); ?>
+                                    </p>
+                                <?php endif; ?>
+
                                 <p style="margin-top: 16px;">
                                     <button type="button" class="button dt-migration-run-preflight" data-import-channel="file">
                                         <?php esc_html_e( 'Run preflight', 'disciple-tools-migration' ); ?>
@@ -737,6 +779,7 @@ class Disciple_Tools_Migration_Tab_Import {
 
             // Store allowed_items from export response for use in preview tables.
             $this->export_allowed_items = $export_body['settings']['allowed_items'] ?? [];
+            $this->import_preview_export_include_activity_log = ! empty( $export_body['settings']['include_activity_log'] );
 
             $preview = [];
             foreach ( $post_types as $post_type => $config ) {
@@ -850,6 +893,7 @@ class Disciple_Tools_Migration_Tab_Import {
         // Always clear previous preview when re-submitting the form.
         $this->settings_preview           = null;
         $this->import_preview_user_count = 0;
+        $this->import_preview_export_include_activity_log = false;
         $this->import_preview_channel     = null;
         $this->records_preview            = null;
         $this->export_allowed_items       = null;
@@ -987,6 +1031,7 @@ class Disciple_Tools_Migration_Tab_Import {
         $tiles_all     = $dt_settings['dt_tiles_settings']['values'] ?? [];
         $fields_all    = $dt_settings['dt_fields_settings']['values'] ?? [];
         $this->export_allowed_items = $payload['settings']['allowed_items'] ?? [];
+        $this->import_preview_export_include_activity_log = ! empty( $payload['settings']['include_activity_log'] );
         $sys_users     = $payload['export']['system_users']['users'] ?? [];
         $this->import_preview_user_count = is_array( $sys_users ) ? count( $sys_users ) : 0;
 
@@ -999,10 +1044,21 @@ class Disciple_Tools_Migration_Tab_Import {
         }
         $this->settings_preview = $preview;
 
-        $records_raw = $payload['records'] ?? [];
+        $records_raw  = $payload['records'] ?? [];
+        $activity_raw = $payload['activity_log'] ?? [];
         $this->records_preview = [];
         foreach ( $records_raw as $post_type => $recs ) {
-            $this->records_preview[ $post_type ] = [ 'count' => is_array( $recs ) ? count( $recs ) : 0 ];
+            $activity_n = 0;
+            if ( $this->import_preview_export_include_activity_log && isset( $activity_raw[ $post_type ] ) && is_array( $activity_raw[ $post_type ] ) ) {
+                $activity_n = count( $activity_raw[ $post_type ] );
+            }
+            $row = [
+                'count' => is_array( $recs ) ? count( $recs ) : 0,
+            ];
+            if ( $this->import_preview_export_include_activity_log ) {
+                $row['activity_log_count'] = $activity_n;
+            }
+            $this->records_preview[ $post_type ] = $row;
         }
 
         $this->import_preview_channel = 'file';
@@ -1112,6 +1168,61 @@ class Disciple_Tools_Migration_Tab_Import {
             <?php endif; ?>
             </tbody>
         </table>
+        <?php
+    }
+
+    /**
+     * Sums activity_log_count values from a records preview payload.
+     *
+     * @param array<string, array<string, mixed>> $records_preview
+     */
+    private function sum_preview_activity_log_counts( array $records_preview ) : int {
+        $total = 0;
+        foreach ( $records_preview as $row ) {
+            if ( is_array( $row ) && isset( $row['activity_log_count'] ) ) {
+                $total += (int) $row['activity_log_count'];
+            }
+        }
+        return $total;
+    }
+
+    /**
+     * Extra settings-table row describing activity log presence in the previewed export.
+     */
+    private function render_import_preview_activity_settings_row() : void {
+        $records_preview = is_array( $this->records_preview ) ? $this->records_preview : [];
+        $activity_total  = $this->sum_preview_activity_log_counts( $records_preview );
+        ?>
+        <tr class="dt-migration-activity-log-preview-row">
+            <td><span aria-hidden="true">&mdash;</span></td>
+            <td><?php esc_html_e( 'Activity log (with records)', 'disciple-tools-migration' ); ?></td>
+            <td>
+                <?php
+                echo $this->import_preview_export_include_activity_log
+                    ? esc_html__( 'In export', 'disciple-tools-migration' )
+                    : esc_html__( 'Not included', 'disciple-tools-migration' );
+                ?>
+            </td>
+            <td>
+                <?php
+                if ( $this->import_preview_export_include_activity_log ) {
+                    if ( $activity_total > 0 ) {
+                        echo esc_html(
+                            sprintf(
+                                /* translators: %s: formatted number of activity log entries */
+                                __( '%s activity entries in this preview (counts per post type are below).', 'disciple-tools-migration' ),
+                                number_format_i18n( $activity_total )
+                            )
+                        );
+                    } else {
+                        esc_html_e( 'The source included activity in exports, but there are no rows for the post types shown below.', 'disciple-tools-migration' );
+                    }
+                } else {
+                    esc_html_e( 'The source did not include activity history in this package.', 'disciple-tools-migration' );
+                }
+                ?>
+            </td>
+        </tr>
         <?php
     }
 }

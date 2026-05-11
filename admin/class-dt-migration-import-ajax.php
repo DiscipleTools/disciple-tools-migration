@@ -304,6 +304,18 @@ class Disciple_Tools_Migration_Import_Ajax {
                 $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $pum_result['errors'] );
             }
 
+            if ( ! empty( $settings['include_activity_log'] ) ) {
+                $activity_rows = $rbody['activity_log'] ?? [];
+                $act_result    = Disciple_Tools_Migration_Import_Engine::import_activity_log_for_posts(
+                    is_array( $activity_rows ) ? $activity_rows : [],
+                    $batch_post_ids,
+                    $post_type
+                );
+                if ( ! empty( $act_result['errors'] ) ) {
+                    $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $act_result['errors'] );
+                }
+            }
+
             wp_send_json_success( [
                 'done'          => ! $has_more,
                 'phase'         => 'records',
@@ -484,6 +496,18 @@ class Disciple_Tools_Migration_Import_Ajax {
             );
             if ( ! empty( $pum_result['errors'] ) ) {
                 $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $pum_result['errors'] );
+            }
+
+            if ( ! empty( $settings['include_activity_log'] ) ) {
+                $activity_rows = $payload['activity_log'][ $post_type ] ?? [];
+                $act_result    = Disciple_Tools_Migration_Import_Engine::import_activity_log_for_posts(
+                    is_array( $activity_rows ) ? $activity_rows : [],
+                    $slice_post_ids,
+                    $post_type
+                );
+                if ( ! empty( $act_result['errors'] ) ) {
+                    $batch_result['errors'] = array_merge( $batch_result['errors'] ?? [], $act_result['errors'] );
+                }
             }
 
             wp_send_json_success( [
