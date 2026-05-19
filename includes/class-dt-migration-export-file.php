@@ -16,8 +16,9 @@ class Disciple_Tools_Migration_Export_File {
     /** Hard ceiling on the JSON export payload size, after the encoding multiplier. */
     const MAX_EXPORT_BYTES = 10485760; // 10 * 1024 * 1024
 
-    /** Multiplier applied to raw DB byte totals to approximate JSON-encoded size. */
-    const JSON_ENCODING_OVERHEAD = 1.5;
+    /** Multiplier applied to raw DB byte totals to approximate the pretty-printed JSON export size.
+     *  Accounts for JSON_PRETTY_PRINT whitespace and DT_Posts field denormalization (key/label/value/type expansion). */
+    const JSON_ENCODING_OVERHEAD = 2.5;
 
     /** Flat allowance for settings/tiles/fields/post-types blocks in the payload. */
     const SETTINGS_OVERHEAD_BYTES = 204800; // 200 KB
@@ -384,9 +385,10 @@ class Disciple_Tools_Migration_Export_File {
             return 0;
         }
 
-        $settings        = Disciple_Tools_Migration_Menu::get_settings();
-        $allowed         = $settings['allowed_items'] ?? [];
-        $allowed_records = $allowed['records'] ?? [];
+        $settings         = Disciple_Tools_Migration_Menu::get_settings();
+        $allowed          = $settings['allowed_items'] ?? [];
+        $allowed_records  = $allowed['records'] ?? [];
+        $include_activity = ! empty( $settings['include_activity_log'] );
 
         $raw_bytes = self::SETTINGS_OVERHEAD_BYTES;
 
@@ -404,7 +406,7 @@ class Disciple_Tools_Migration_Export_File {
                 if ( empty( $ids ) ) {
                     continue;
                 }
-                $raw_bytes += self::sum_record_bytes( $ids );
+                $raw_bytes += self::sum_record_bytes( $ids, (string) $post_type, $include_activity );
             }
         }
 
@@ -419,12 +421,15 @@ class Disciple_Tools_Migration_Export_File {
 
     /**
      * Sums raw byte lengths of the columns that contribute to per-record JSON output:
-     * posts, postmeta, comments, commentmeta, and dt_post_user_meta.
+     * posts, postmeta, comments, commentmeta, dt_post_user_meta, and (when enabled)
+     * dt_activity_log scoped to the given object_type.
      *
-     * @param int[] $post_ids
+     * @param int[]  $post_ids
+     * @param string $post_type        Used as object_type when summing activity log rows.
+     * @param bool   $include_activity Whether to include dt_activity_log bytes.
      * @return int
      */
-    private static function sum_record_bytes( array $post_ids ) : int {
+    private static function sum_record_bytes( array $post_ids, string $post_type = '', bool $include_activity = false ) : int {
         if ( empty( $post_ids ) ) {
             return 0;
         }
@@ -488,6 +493,23 @@ class Disciple_Tools_Migration_Export_File {
                 $post_ids
             )
         );
+
+        if ( $include_activity && '' !== $post_type ) {
+            $activity_table = isset( $wpdb->dt_activity_log ) ? $wpdb->dt_activity_log : $wpdb->prefix . 'dt_activity_log';
+            $total += (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COALESCE(SUM(
+                        LENGTH(action) + LENGTH(object_type) + LENGTH(object_subtype)
+                        + LENGTH(object_name) + LENGTH(object_note) + LENGTH(meta_key)
+                        + LENGTH(meta_value) + LENGTH(old_value) + LENGTH(user_caps)
+                        + LENGTH(field_type) + LENGTH(hist_ip)
+                    ), 0)
+                     FROM {$activity_table}
+                     WHERE object_type = %s AND object_id IN ( $placeholders )",
+                    array_merge( [ $post_type ], $post_ids )
+                )
+            );
+        }
         // phpcs:enable
 
         return $total;
