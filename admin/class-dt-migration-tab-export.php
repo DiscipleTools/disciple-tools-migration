@@ -199,6 +199,7 @@ class Disciple_Tools_Migration_Tab_Export {
                                         <?php esc_html_e( 'Download Export (JSON)', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
+                                <?php $this->maybe_render_too_large_notice(); ?>
                             </form>
                                 <?php if ( $show_export_record_filters ) : ?>
                             <script>
@@ -247,6 +248,37 @@ class Disciple_Tools_Migration_Tab_Export {
         </table>
         <br>
         <!-- End Box -->
+        <?php
+    }
+
+    /**
+     * Shows a one-shot admin notice when the last download attempt was blocked because the
+     * estimated payload exceeded the size cap.
+     */
+    private function maybe_render_too_large_notice() : void {
+        $key  = 'dt_migration_export_too_large_' . get_current_user_id();
+        $data = get_transient( $key );
+        if ( ! is_array( $data ) ) {
+            return;
+        }
+        delete_transient( $key );
+
+        $estimated = isset( $data['estimated'] ) ? (int) $data['estimated'] : 0;
+        $max       = isset( $data['max'] ) ? (int) $data['max'] : 0;
+        ?>
+        <div class="notice notice-error inline" style="margin: 8px 0 0 0; max-width: 720px;">
+            <p>
+                <strong><?php esc_html_e( 'Export too large for download.', 'disciple-tools-migration' ); ?></strong><br>
+                <?php
+                printf(
+                    /* translators: 1: estimated size, 2: maximum size */
+                    esc_html__( 'Estimated %1$s, which exceeds the %2$s limit for downloadable JSON. Go to the target site and on the Import tab use the "API Connection to Source Site" instead.', 'disciple-tools-migration' ),
+                    esc_html( size_format( $estimated ) ),
+                    esc_html( size_format( $max ) )
+                );
+                ?>
+            </p>
+        </div>
         <?php
     }
 

@@ -13,6 +13,15 @@ class Disciple_Tools_Migration_Export_File {
 
     const EXPORT_VERSION = '1.1';
 
+    /** Hard ceiling on the JSON export payload size, after the encoding multiplier. */
+    const MAX_EXPORT_BYTES = 10485760; // 10 * 1024 * 1024
+
+    /** Multiplier applied to raw DB byte totals to approximate JSON-encoded size. */
+    const JSON_ENCODING_OVERHEAD = 1.5;
+
+    /** Flat allowance for settings/tiles/fields/post-types blocks in the payload. */
+    const SETTINGS_OVERHEAD_BYTES = 204800; // 200 KB
+
     /**
      * Builds a full export payload (settings + records) for file download.
      *
@@ -245,7 +254,7 @@ class Disciple_Tools_Migration_Export_File {
      * @param int    $max_id
      * @return int[]
      */
-    private static function get_record_ids( string $post_type, int $limit, int $min_id, int $max_id ) : array {
+    public static function get_record_ids( string $post_type, int $limit, int $min_id, int $max_id ) : array {
         global $wpdb;
 
         if ( $limit > 0 ) {
@@ -360,6 +369,152 @@ class Disciple_Tools_Migration_Export_File {
             ];
         }
         return $stats;
+    }
+
+    /**
+     * Estimates the JSON-encoded byte size of a file export given the same record options
+     * that would be passed to {@see build_export()}. Sums raw column lengths from the underlying
+     * tables and applies a JSON-encoding multiplier. Cheap: a handful of SUM(LENGTH(...)) queries.
+     *
+     * @param array $record_options Per-post-type options matching {@see build_export()}.
+     * @return int Estimated bytes after JSON encoding.
+     */
+    public static function estimate_export_bytes( array $record_options = [] ) : int {
+        if ( ! class_exists( 'Disciple_Tools_Migration_Menu' ) ) {
+            return 0;
+        }
+
+        $settings        = Disciple_Tools_Migration_Menu::get_settings();
+        $allowed         = $settings['allowed_items'] ?? [];
+        $allowed_records = $allowed['records'] ?? [];
+
+        $raw_bytes = self::SETTINGS_OVERHEAD_BYTES;
+
+        if ( ! empty( $allowed_records ) && is_array( $allowed_records ) ) {
+            foreach ( $allowed_records as $post_type => $enabled ) {
+                if ( ! $enabled ) {
+                    continue;
+                }
+                $opts   = $record_options[ $post_type ] ?? [];
+                $limit  = isset( $opts['limit'] ) ? absint( $opts['limit'] ) : 0;
+                $min_id = isset( $opts['min_id'] ) ? absint( $opts['min_id'] ) : 0;
+                $max_id = isset( $opts['max_id'] ) ? absint( $opts['max_id'] ) : 0;
+
+                $ids = self::get_record_ids( $post_type, $limit, $min_id, $max_id );
+                if ( empty( $ids ) ) {
+                    continue;
+                }
+                $raw_bytes += self::sum_record_bytes( $ids );
+            }
+        }
+
+        if ( ! empty( $allowed['system_users'] ) ) {
+            $raw_bytes += self::sum_user_bytes();
+        }
+
+        $estimated = (int) ceil( $raw_bytes * self::JSON_ENCODING_OVERHEAD );
+
+        return (int) apply_filters( 'dt_migration_estimated_export_bytes', $estimated, $record_options );
+    }
+
+    /**
+     * Sums raw byte lengths of the columns that contribute to per-record JSON output:
+     * posts, postmeta, comments, commentmeta, and dt_post_user_meta.
+     *
+     * @param int[] $post_ids
+     * @return int
+     */
+    private static function sum_record_bytes( array $post_ids ) : int {
+        if ( empty( $post_ids ) ) {
+            return 0;
+        }
+
+        global $wpdb;
+        $post_ids     = array_values( array_map( 'intval', $post_ids ) );
+        $placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+        $total        = 0;
+
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $total += (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COALESCE(SUM(
+                    LENGTH(post_title) + LENGTH(post_content) + LENGTH(post_excerpt)
+                    + LENGTH(post_name) + LENGTH(post_status) + LENGTH(post_type)
+                    + LENGTH(post_date) + LENGTH(post_modified)
+                ), 0)
+                 FROM {$wpdb->posts}
+                 WHERE ID IN ( $placeholders )",
+                $post_ids
+            )
+        );
+
+        $total += (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COALESCE(SUM(LENGTH(meta_key) + LENGTH(meta_value)), 0)
+                 FROM {$wpdb->postmeta}
+                 WHERE post_id IN ( $placeholders )",
+                $post_ids
+            )
+        );
+
+        $total += (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COALESCE(SUM(
+                    LENGTH(comment_author) + LENGTH(comment_author_email)
+                    + LENGTH(comment_author_url) + LENGTH(comment_content)
+                    + LENGTH(comment_date) + LENGTH(comment_type)
+                ), 0)
+                 FROM {$wpdb->comments}
+                 WHERE comment_post_ID IN ( $placeholders )",
+                $post_ids
+            )
+        );
+
+        $total += (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COALESCE(SUM(LENGTH(cm.meta_key) + LENGTH(cm.meta_value)), 0)
+                 FROM {$wpdb->commentmeta} cm
+                 INNER JOIN {$wpdb->comments} c ON c.comment_ID = cm.comment_id
+                 WHERE c.comment_post_ID IN ( $placeholders )",
+                $post_ids
+            )
+        );
+
+        $total += (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COALESCE(SUM(LENGTH(meta_key) + LENGTH(meta_value)), 0)
+                 FROM {$wpdb->dt_post_user_meta}
+                 WHERE post_id IN ( $placeholders )",
+                $post_ids
+            )
+        );
+        // phpcs:enable
+
+        return $total;
+    }
+
+    /**
+     * Sums raw byte lengths from the users + usermeta tables (for system_users exports).
+     *
+     * @return int
+     */
+    private static function sum_user_bytes() : int {
+        global $wpdb;
+
+        $users = (int) $wpdb->get_var(
+            "SELECT COALESCE(SUM(
+                LENGTH(user_login) + LENGTH(user_nicename) + LENGTH(user_email)
+                + LENGTH(user_registered) + LENGTH(display_name)
+            ), 0)
+             FROM {$wpdb->users}"
+        );
+
+        $usermeta = (int) $wpdb->get_var(
+            "SELECT COALESCE(SUM(LENGTH(meta_key) + LENGTH(meta_value)), 0)
+             FROM {$wpdb->usermeta}"
+        );
+
+        return $users + $usermeta;
     }
 
     /**
