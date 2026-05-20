@@ -1048,14 +1048,14 @@ class Disciple_Tools_Migration_Tab_Import {
         $activity_raw = $payload['activity_log'] ?? [];
         $this->records_preview = [];
         foreach ( $records_raw as $post_type => $recs ) {
-            $activity_n = 0;
-            if ( $this->import_preview_export_include_activity_log && isset( $activity_raw[ $post_type ] ) && is_array( $activity_raw[ $post_type ] ) ) {
-                $activity_n = count( $activity_raw[ $post_type ] );
-            }
             $row = [
                 'count' => is_array( $recs ) ? count( $recs ) : 0,
             ];
             if ( $this->import_preview_export_include_activity_log ) {
+                $activity_n = 0;
+                if ( isset( $activity_raw[ $post_type ] ) && is_array( $activity_raw[ $post_type ] ) ) {
+                    $activity_n = count( $activity_raw[ $post_type ] );
+                }
                 $row['activity_log_count'] = $activity_n;
             }
             $this->records_preview[ $post_type ] = $row;

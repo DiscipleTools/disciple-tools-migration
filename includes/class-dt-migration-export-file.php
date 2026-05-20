@@ -223,14 +223,14 @@ class Disciple_Tools_Migration_Export_File {
         return array_map(
             static function ( array $row ) : array {
                 return [
-                    'user_caps'      => (string) ( $row['user_caps'] ?? 'guest' ),
+                    'user_caps'      => (string) ( $row['user_caps'] ?? '' ),
                     'action'         => (string) ( $row['action'] ?? '' ),
                     'object_type'    => (string) ( $row['object_type'] ?? '' ),
                     'object_subtype' => (string) ( $row['object_subtype'] ?? '' ),
                     'object_name'    => (string) ( $row['object_name'] ?? '' ),
                     'object_id'      => (int) ( $row['object_id'] ?? 0 ),
                     'user_id'        => (int) ( $row['user_id'] ?? 0 ),
-                    'hist_ip'        => isset( $row['hist_ip'] ) ? (string) $row['hist_ip'] : '127.0.0.1',
+                    'hist_ip'        => isset( $row['hist_ip'] ) ? (string) $row['hist_ip'] : '',
                     'hist_time'      => (int) ( $row['hist_time'] ?? 0 ),
                     'object_note'    => (string) ( $row['object_note'] ?? '' ),
                     'meta_id'        => (int) ( $row['meta_id'] ?? 0 ),

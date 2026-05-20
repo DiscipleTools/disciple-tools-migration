@@ -539,7 +539,8 @@ class Disciple_Tools_Migration_Import_Engine {
                 self::merge_connections_into_deferred_queue( $post_type, $post_id, $split['connection'] );
             }
 
-            $err = self::insert_or_update_post( $post_type, $post_id, $fields, $mapped_author );
+            $post_dates = self::wp_post_dates_from_record( $record );
+            $err        = self::insert_or_update_post( $post_type, $post_id, $fields, $mapped_author, $post_dates );
             if ( is_wp_error( $err ) ) {
                 $result['errors'][] = sprintf(
                     /* translators: 1: post type, 2: post ID, 3: error message */
@@ -931,6 +932,7 @@ class Disciple_Tools_Migration_Import_Engine {
             return $result;
         }
 
+        // Per-row inserts: acceptable for typical batches; large activity exports may need chunked multi-row INSERT later.
         $scope = array_flip( $post_ids );
         foreach ( $rows as $row ) {
             if ( ! is_array( $row ) ) {
@@ -963,14 +965,14 @@ class Disciple_Tools_Migration_Import_Engine {
             $ok = $wpdb->insert(
                 $table,
                 [
-                    'user_caps'      => (string) ( $row['user_caps'] ?? 'guest' ),
+                    'user_caps'      => (string) ( $row['user_caps'] ?? '' ),
                     'action'         => (string) ( $row['action'] ?? '' ),
                     'object_type'    => $post_type,
                     'object_subtype' => (string) ( $row['object_subtype'] ?? '' ),
                     'object_name'    => (string) ( $row['object_name'] ?? '' ),
                     'object_id'      => $pid,
                     'user_id'        => $target_uid,
-                    'hist_ip'        => isset( $row['hist_ip'] ) ? (string) $row['hist_ip'] : '127.0.0.1',
+                    'hist_ip'        => isset( $row['hist_ip'] ) ? (string) $row['hist_ip'] : '',
                     'hist_time'      => isset( $row['hist_time'] ) ? (int) $row['hist_time'] : 0,
                     'object_note'    => (string) ( $row['object_note'] ?? '' ),
                     'meta_id'        => isset( $row['meta_id'] ) ? (int) $row['meta_id'] : 0,
@@ -1625,19 +1627,59 @@ class Disciple_Tools_Migration_Import_Engine {
     }
 
     /**
+     * Builds wp_posts date fields from an exported DT_Posts record.
+     *
+     * Supports DT_Posts::get_post shape (post_date.timestamp) and legacy flat post_date_gmt strings.
+     *
+     * @param array<string, mixed> $record Exported record.
+     * @return array{ post_date: string, post_date_gmt: string }|null Null when no valid date is present.
+     */
+    public static function wp_post_dates_from_record( array $record ) : ?array {
+        $gmt = '';
+
+        if ( isset( $record['post_date'] ) && is_array( $record['post_date'] ) ) {
+            $timestamp = isset( $record['post_date']['timestamp'] ) ? (int) $record['post_date']['timestamp'] : 0;
+            if ( $timestamp > 0 ) {
+                $gmt = gmdate( 'Y-m-d H:i:s', $timestamp );
+            }
+        }
+
+        if ( '' === $gmt && ! empty( $record['post_date_gmt'] ) && is_string( $record['post_date_gmt'] ) ) {
+            $gmt = $record['post_date_gmt'];
+        }
+
+        if ( '' === $gmt && ! empty( $record['post_date'] ) && is_string( $record['post_date'] ) ) {
+            $parsed = strtotime( $record['post_date'] );
+            if ( $parsed > 0 ) {
+                $gmt = gmdate( 'Y-m-d H:i:s', $parsed );
+            }
+        }
+
+        if ( '' === $gmt || '0000-00-00 00:00:00' === $gmt ) {
+            return null;
+        }
+
+        return [
+            'post_date_gmt' => $gmt,
+            'post_date'     => get_date_from_gmt( $gmt ),
+        ];
+    }
+
+    /**
      * Inserts a post with a specific ID (preserves relationships).
      *
      * Uses wp_insert_post with import_id for the base post, then DT_Posts::update_post
      * to apply all field values, connections, and meta.
      *
-     * @param string $post_type
-     * @param int    $post_id   Desired post ID.
-     * @param array  $fields    Prepared fields from prepare_record_fields_for_import.
-     * @param int    $post_author_id Remapped WordPress user ID for post_author (0 = use current user on insert, unchanged on update).
+     * @param string                                    $post_type
+     * @param int                                       $post_id   Desired post ID.
+     * @param array                                     $fields    Prepared fields from prepare_record_fields_for_import.
+     * @param int                                       $post_author_id Remapped WordPress user ID for post_author (0 = use current user on insert, unchanged on update).
+     * @param array{ post_date: string, post_date_gmt: string }|null $post_dates Source creation dates from {@see wp_post_dates_from_record()}.
      *
      * @return true|WP_Error
      */
-    private static function insert_or_update_post( string $post_type, int $post_id, array $fields, int $post_author_id = 0 ) {
+    private static function insert_or_update_post( string $post_type, int $post_id, array $fields, int $post_author_id = 0, ?array $post_dates = null ) {
         $existing       = get_post( $post_id );
         $author_for_ins = $post_author_id > 0 ? $post_author_id : get_current_user_id();
 
@@ -1646,16 +1688,16 @@ class Disciple_Tools_Migration_Import_Engine {
         };
 
         if ( $existing && get_post_type( $post_id ) === $post_type ) {
+            $post_update = [ 'ID' => $post_id ];
             if ( $post_author_id > 0 && (int) $existing->post_author !== $post_author_id ) {
-                wp_update_post(
-                    wp_slash(
-                        [
-                            'ID'          => $post_id,
-                            'post_author' => $post_author_id,
-                        ]
-                    ),
-                    true
-                );
+                $post_update['post_author'] = $post_author_id;
+            }
+            if ( null !== $post_dates ) {
+                $post_update['post_date']     = $post_dates['post_date'];
+                $post_update['post_date_gmt'] = $post_dates['post_date_gmt'];
+            }
+            if ( count( $post_update ) > 1 ) {
+                wp_update_post( wp_slash( $post_update ), true );
             }
             self::$during_record_import = true;
             add_filter( 'get_post_metadata', [ self::class, 'filter_details_meta_during_import' ], 10, 5 );
@@ -1679,6 +1721,10 @@ class Disciple_Tools_Migration_Import_Engine {
             'post_status' => $fields['post_status'] ?? 'publish',
             'post_author' => $author_for_ins,
         ];
+        if ( null !== $post_dates ) {
+            $post_arr['post_date']     = $post_dates['post_date'];
+            $post_arr['post_date_gmt'] = $post_dates['post_date_gmt'];
+        }
 
         $inserted_id = wp_insert_post( $post_arr, true );
         if ( is_wp_error( $inserted_id ) ) {
