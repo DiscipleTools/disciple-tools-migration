@@ -13,7 +13,7 @@ class Disciple_Tools_Migration_Export_File {
 
     const EXPORT_VERSION = '1.1';
 
-    /** Hard ceiling on the JSON export payload size, after the encoding multiplier. */
+    /** Estimated JSON export size, after the encoding multiplier, above which the download warns that the target site may fail to import it. */
     const MAX_EXPORT_BYTES = 10485760; // 10 * 1024 * 1024
 
     /** Multiplier applied to raw DB byte totals to approximate the pretty-printed JSON export size.

@@ -72,16 +72,19 @@ class Disciple_Tools_Migration_Export_Download {
             }
         }
 
-        $max_bytes = (int) apply_filters( 'dt_migration_export_max_bytes', Disciple_Tools_Migration_Export_File::MAX_EXPORT_BYTES );
-        $estimated = Disciple_Tools_Migration_Export_File::estimate_export_bytes( $record_options );
-        if ( $estimated > $max_bytes ) {
-            set_transient(
-                'dt_migration_export_too_large_' . get_current_user_id(),
-                [ 'estimated' => $estimated, 'max' => $max_bytes ],
-                MINUTE_IN_SECONDS
-            );
-            wp_safe_redirect( admin_url( 'admin.php?page=disciple_tools_migration&tab=export' ) );
-            exit;
+        $ignore_size = ! empty( $_POST['dt_migration_export_ignore_size'] );
+        if ( ! $ignore_size ) {
+            $max_bytes = (int) apply_filters( 'dt_migration_export_max_bytes', Disciple_Tools_Migration_Export_File::MAX_EXPORT_BYTES );
+            $estimated = Disciple_Tools_Migration_Export_File::estimate_export_bytes( $record_options );
+            if ( $estimated > $max_bytes ) {
+                set_transient(
+                    'dt_migration_export_too_large_' . get_current_user_id(),
+                    [ 'estimated' => $estimated, 'max' => $max_bytes, 'record_options' => $record_options ],
+                    MINUTE_IN_SECONDS
+                );
+                wp_safe_redirect( admin_url( 'admin.php?page=disciple_tools_migration&tab=export' ) );
+                exit;
+            }
         }
 
         $payload = Disciple_Tools_Migration_Export_File::build_export( $record_options );

@@ -199,8 +199,8 @@ class Disciple_Tools_Migration_Tab_Export {
                                         <?php esc_html_e( 'Download Export (JSON)', 'disciple-tools-migration' ); ?>
                                     </button>
                                 </p>
-                                <?php $this->maybe_render_too_large_notice(); ?>
                             </form>
+                                <?php $this->maybe_render_too_large_notice(); ?>
                                 <?php if ( $show_export_record_filters ) : ?>
                             <script>
                             ( function( $ ) {
@@ -252,8 +252,9 @@ class Disciple_Tools_Migration_Tab_Export {
     }
 
     /**
-     * Shows a one-shot admin notice when the last download attempt was blocked because the
-     * estimated payload exceeded the size cap.
+     * Shows a one-shot warning when the last download attempt was held back because the
+     * estimated payload exceeds the size the target site can reliably import, with a form
+     * that resubmits the same record options and skips the size check.
      */
     private function maybe_render_too_large_notice() : void {
         $key  = 'dt_migration_export_too_large_' . get_current_user_id();
@@ -263,21 +264,42 @@ class Disciple_Tools_Migration_Tab_Export {
         }
         delete_transient( $key );
 
-        $estimated = isset( $data['estimated'] ) ? (int) $data['estimated'] : 0;
-        $max       = isset( $data['max'] ) ? (int) $data['max'] : 0;
+        $estimated      = isset( $data['estimated'] ) ? (int) $data['estimated'] : 0;
+        $max            = isset( $data['max'] ) ? (int) $data['max'] : 0;
+        $record_options = isset( $data['record_options'] ) && is_array( $data['record_options'] ) ? $data['record_options'] : [];
         ?>
-        <div class="notice notice-error inline" style="margin: 8px 0 0 0; max-width: 720px;">
+        <div class="notice notice-warning inline" style="margin: 8px 0 0 0; max-width: 720px;">
             <p>
-                <strong><?php esc_html_e( 'Export too large for download.', 'disciple-tools-migration' ); ?></strong><br>
+                <strong><?php esc_html_e( 'This file will likely be too big to upload to the target site.', 'disciple-tools-migration' ); ?></strong><br>
                 <?php
                 printf(
                     /* translators: 1: estimated size, 2: maximum size */
-                    esc_html__( 'Estimated %1$s, which exceeds the %2$s limit for downloadable JSON. Go to the target site and on the Import tab use the "API Connection to Source Site" instead.', 'disciple-tools-migration' ),
+                    esc_html__( 'Estimated %1$s, which exceeds the %2$s the target site can reliably import from a file. We recommend going to the target site and using "API Connection to Source Site" on the Import tab instead.', 'disciple-tools-migration' ),
                     esc_html( size_format( $estimated ) ),
                     esc_html( size_format( $max ) )
                 );
                 ?>
             </p>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <input type="hidden" name="action" value="dt_migration_download_export">
+                <input type="hidden" name="dt_migration_export_ignore_size" value="1">
+                <?php wp_nonce_field( 'dt_migration_download_export', 'dt_migration_download_export_nonce' ); ?>
+                <?php
+                foreach ( $record_options as $post_type => $opts ) :
+                    $limit = (int) ( $opts['limit'] ?? 0 );
+                    $mode  = $limit > 0 ? 'limit' : 'range';
+                    ?>
+                    <input type="hidden" name="dt_migration_export_by[<?php echo esc_attr( $post_type ); ?>]" value="<?php echo esc_attr( $mode ); ?>">
+                    <input type="hidden" name="dt_migration_export_limit[<?php echo esc_attr( $post_type ); ?>]" value="<?php echo (int) $limit; ?>">
+                    <input type="hidden" name="dt_migration_export_min_id[<?php echo esc_attr( $post_type ); ?>]" value="<?php echo (int) ( $opts['min_id'] ?? 0 ); ?>">
+                    <input type="hidden" name="dt_migration_export_max_id[<?php echo esc_attr( $post_type ); ?>]" value="<?php echo (int) ( $opts['max_id'] ?? 0 ); ?>">
+                <?php endforeach; ?>
+                <p>
+                    <button type="submit" class="button">
+                        <?php esc_html_e( 'Download anyway', 'disciple-tools-migration' ); ?>
+                    </button>
+                </p>
+            </form>
         </div>
         <?php
     }
