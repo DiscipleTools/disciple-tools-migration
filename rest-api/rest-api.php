@@ -119,6 +119,7 @@ class Disciple_Tools_Migration_Endpoints {
             'enabled'            => ! empty( $settings['enabled'] ),
             // Both API and file export/import are always available; legacy stored settings may still contain mode.
             'mode'               => 'both',
+            'include_activity_log' => ! empty( $settings['include_activity_log'] ),
             'allowed_items'      => $settings['allowed_items'] ?? [],
             'site_meta'          => $this->get_site_meta(),
             'plugin_capabilities' => [
@@ -232,9 +233,10 @@ class Disciple_Tools_Migration_Endpoints {
         $response = [
             'site_meta' => $site_meta,
             'settings'  => [
-                'enabled'       => ! empty( $settings['enabled'] ),
-                'mode'          => 'both',
-                'allowed_items' => $allowed,
+                'enabled'               => ! empty( $settings['enabled'] ),
+                'include_activity_log'  => ! empty( $settings['include_activity_log'] ),
+                'mode'                  => 'both',
+                'allowed_items'         => $allowed,
             ],
             'export'    => $export_out,
             'request'   => $body,
@@ -291,6 +293,14 @@ class Disciple_Tools_Migration_Endpoints {
             }
         }
 
+        if ( ! empty( $settings['include_activity_log'] ) && ! empty( $records ) ) {
+            $activity_totals = $this->get_activity_log_counts_for_post_types( array_keys( $records ) );
+            foreach ( $records as $post_type => &$data ) {
+                $data['activity_log_count'] = (int) ( $activity_totals[ $post_type ] ?? 0 );
+            }
+            unset( $data );
+        }
+
         $response = [
             'site_meta' => $this->get_site_meta(),
             'records'   => $records,
@@ -298,6 +308,57 @@ class Disciple_Tools_Migration_Endpoints {
         ];
 
         return new WP_REST_Response( $response, 200 );
+    }
+
+    /**
+     * Counts wp_dt_activity_log rows per object_type for the given post types.
+     *
+     * @param string[] $post_types
+     * @return array<string, int>
+     */
+    protected function get_activity_log_counts_for_post_types( array $post_types ) : array {
+        $post_types = array_values(
+            array_unique(
+                array_filter(
+                    array_map(
+                        static function ( $pt ) {
+                            return is_string( $pt ) ? sanitize_key( $pt ) : '';
+                        },
+                        $post_types
+                    )
+                )
+            )
+        );
+        if ( empty( $post_types ) ) {
+            return [];
+        }
+
+        global $wpdb;
+        $table        = isset( $wpdb->dt_activity_log ) ? $wpdb->dt_activity_log : $wpdb->prefix . 'dt_activity_log';
+        $placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT object_type, COUNT(*) AS cnt FROM {$table} WHERE object_type IN ( $placeholders ) GROUP BY object_type",
+                $post_types
+            ),
+            ARRAY_A
+        );
+        // phpcs:enable
+
+        if ( ! is_array( $rows ) ) {
+            return [];
+        }
+
+        $out = [];
+        foreach ( $rows as $row ) {
+            if ( ! empty( $row['object_type'] ) ) {
+                $out[ (string) $row['object_type'] ] = (int) ( $row['cnt'] ?? 0 );
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -387,14 +448,21 @@ class Disciple_Tools_Migration_Endpoints {
             ? Disciple_Tools_Migration_Export_File::fetch_post_user_meta( array_map( 'intval', $ids ) )
             : [];
 
+        $settings = class_exists( 'Disciple_Tools_Migration_Menu' ) ? Disciple_Tools_Migration_Menu::get_settings() : [];
+        $activity_log = [];
+        if ( ! empty( $settings['include_activity_log'] ) && class_exists( 'Disciple_Tools_Migration_Export_File' ) ) {
+            $activity_log = Disciple_Tools_Migration_Export_File::fetch_activity_log_for_posts( $post_type, array_map( 'intval', $ids ) );
+        }
+
         return new WP_REST_Response(
             [
-                'records'        => $records,
-                'post_user_meta' => $post_user_meta,
-                'total'          => $total,
-                'offset'         => $offset,
-                'limit'          => $limit,
-                'has_more'       => ( $offset + count( $records ) ) < $total,
+                'records'         => $records,
+                'post_user_meta'  => $post_user_meta,
+                'activity_log'    => $activity_log,
+                'total'           => $total,
+                'offset'          => $offset,
+                'limit'           => $limit,
+                'has_more'        => ( $offset + count( $records ) ) < $total,
             ],
             200
         );

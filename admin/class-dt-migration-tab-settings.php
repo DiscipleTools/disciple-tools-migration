@@ -139,6 +139,20 @@ class Disciple_Tools_Migration_Tab_Settings {
                 </td>
             </tr>
             <tr>
+                <td>
+                    <?php esc_html_e( 'Activity log', 'disciple-tools-migration' ); ?>
+                </td>
+                <td>
+                    <label>
+                        <input type="checkbox" name="dt_migration_include_activity_log" value="1" <?php checked( ! empty( $settings['include_activity_log'] ) ); ?> />
+                        <?php esc_html_e( 'Include activity history when exporting records, and restore it when importing (per batch).', 'disciple-tools-migration' ); ?>
+                    </label>
+                    <p class="description">
+                        <?php esc_html_e( 'When importing, existing activity rows for the affected records are removed and replaced with the export. Leave off for smaller exports or if you do not need historical activity on the target site.', 'disciple-tools-migration' ); ?>
+                    </p>
+                </td>
+            </tr>
+            <tr>
                 <th colspan="2" scope="colgroup">
                     <?php esc_html_e( 'File import jobs', 'disciple-tools-migration' ); ?>
                 </th>
@@ -197,6 +211,8 @@ class Disciple_Tools_Migration_Tab_Settings {
         $settings = Disciple_Tools_Migration_Menu::get_settings();
 
         $settings['enabled'] = isset( $post_vars['dt_migration_enabled'] ) && '1' === (string) $post_vars['dt_migration_enabled'];
+
+        $settings['include_activity_log'] = isset( $post_vars['dt_migration_include_activity_log'] ) && '1' === (string) $post_vars['dt_migration_include_activity_log'];
 
         $allowed = $post_vars['dt_migration_allowed_items'] ?? [];
 
